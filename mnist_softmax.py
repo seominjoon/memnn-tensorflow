@@ -24,6 +24,8 @@ train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
 
 for i in xrange(1000):
     batch = mnist.train.next_batch(50)
+    print batch[0].shape
+    print batch[1]
     train_step.run(feed_dict={x: batch[0], y_: batch[1]})
 
 print accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels})

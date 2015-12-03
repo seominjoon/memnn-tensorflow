@@ -51,6 +51,7 @@ crashlytics-build.properties
 
 data
 MNIST_data
+memnn/data
 checkpoint
 
 
