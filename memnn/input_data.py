@@ -1,12 +1,13 @@
 import os
 import re
 import logging
+import numpy as np
 
 
 def read_data_set(file_path):
     with open(file_path, 'rb') as fh:
-        s_re = re.compile("^(\\d+) ([\\w\\s\\?.]+)")
-        q_re = re.compile("^(\\d+) ([\\w\\s\\?.]+)\t(\\w+)\t(\\d+)")
+        s_re = re.compile("^(\\d+) ([\\w\\s.]+)")
+        q_re = re.compile("^(\\d+) ([\\w\\s\\?]+)\t([\\w,]+)\t(\\d+)")
         paragraphs = []
         questions = []
         answers = []
@@ -33,13 +34,6 @@ def read_data_set(file_path):
         return DataSet(paragraphs, questions, answers)
 
 
-def get_vocabulary(data_set):
-    paragraph_words = set(word for paragraph in data_set.paragraphs for sentence in paragraph for word in sentence)
-    question_words = set(word for question in data_set.questions for word in question)
-    answer_words = set(word for word in data_set.answers)
-    return sorted(list(paragraph_words.union(question_words).union(answer_words)))
-
-
 def tokenize(raw):
     return re.findall(r"[\w']+|[.,!?;]", raw)
 
@@ -51,25 +45,46 @@ class DataSet(object):
         self.answers = answers
         assert len(paragraphs) == len(questions) and len(questions) == len(answers)
         self._num_examples = len(paragraphs)
+        paragraph_words = set(word for paragraph in self.paragraphs for sentence in paragraph for word in sentence)
+        question_words = set(word for question in self.questions for word in question)
+        answer_words = set(word for word in self.answers)
+        self.vocab = sorted(list(paragraph_words.union(question_words).union(answer_words)))
+
+        self._indices = None
+        self.shuffled_paragraphs = None
+        self.shuffled_questions = None
+        self.shuffled_answers = None
         self._index_in_epoch = 0
+        self._epochs_completed = 0
+        self.shuffle()
+
+    def shuffle(self):
+        self._indices = range(self._num_examples)
+        np.random.shuffle(self._indices)
+        self.shuffled_paragraphs = [self.paragraphs[i] for i in self._indices]
+        self.shuffled_questions = [self.questions[i] for i in self._indices]
+        self.shuffled_answers = [self.questions[i] for i in self._indices]
 
     def next_batch(self, batch_size):
         i = self._index_in_epoch
         self._index_in_epoch += batch_size
         j = self._index_in_epoch
-        return self.paragraphs[i:j], self.questions[i:j], self.answers[i:j]
+        if self._index_in_epoch > self._num_examples:
+            self.shuffle()
+            i = 0
+            self._index_in_epoch = batch_size
+            j = self._index_in_epoch
+            self._epochs_completed += 1
+        return self.shuffled_paragraphs[i:j], self.shuffled_questions[i:j], self.shuffled_answers[i:j]
 
-    def has_next_batch(self, batch_size):
-        return self._index_in_epoch + batch_size <= self._num_examples
 
 if __name__ == "__main__":
     dir_path = "/Users/minjoon/workspace/memnn/memnn/data/tasks_1-20_v1-2/en/"
-    vocab = set()
+    vocab_set = set()
     for file_name in os.listdir(dir_path):
         if file_name.endswith("txt"):
             file_path = os.path.join(dir_path, file_name)
             ds = read_data_set(file_path)
-            curr_vocab = get_vocabulary(ds)
-            vocab = vocab.union(curr_vocab)
-    print len(vocab)
-    print vocab
+            vocab_set = vocab_set.union(ds.vocab)
+    print len(vocab_set)
+    print vocab_set
