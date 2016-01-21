@@ -6,7 +6,14 @@ mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
 sess = tf.InteractiveSession()
 
 
-x = tf.placeholder("float", shape=[None, 784])
+x = tf.placeholder("float", shape=[50, 784])
+out = []
+for xi in tf.unpack(x):
+    add = tf.concat(0, [tf.constant(1.0/(i+1), dtype='float32') for i in range(784)])
+    new_xi = xi + add
+    out.append(new_xi)
+xx = tf.pack(out) + x
+print xx
 y_ = tf.placeholder("float", shape=[None, 10])
 
 W = tf.Variable(tf.truncated_normal([784, 10], stddev=1.0/math.sqrt(784)))
@@ -24,9 +31,7 @@ train_step = tf.train.GradientDescentOptimizer(0.01).minimize(cross_entropy)
 
 for i in xrange(1000):
     batch = mnist.train.next_batch(50)
-    print batch[0].shape
-    print batch[1]
     train_step.run(feed_dict={x: batch[0], y_: batch[1]})
 
-print accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels})
+#print accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels})
 

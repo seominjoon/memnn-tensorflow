@@ -1,6 +1,29 @@
-import input_data
 import tensorflow as tf
+from tensorflow.python.ops import variable_scope as vs
 import math
+import numpy as np
+
+
+class MemoryLayer2(object):
+    def __init__(self, config):
+        self._num_units = config.num_units # d
+
+    def __call__(self, inputs, memories, memory_lengths, scope=None):
+        with vs.variable_scope(scope or type(self).__name__):
+            memory_vectors = []
+            for memory, memory_length in zip(memories, memory_lengths):
+                m = tf.zeros([self._num_units])
+                for j, x in enumerate(memory):
+                    Ax = tf.nn.embedding_lookup(self.A, x)
+                    l = self._pe(memory_length, j)
+                    m += tf.mul(Ax, l)
+                memory_vectors.append(m)
+
+
+    def _pe(self, memory_length, j):
+        f = lambda J, j, d, k: (1-j/J) - (k/d)*(1-2*j/J)
+        l = [f(memory_length, j, self._num_units, k) for k in range(self._num_units)]
+        return l
 
 class MemN2N(object):
     def __init__(self):
@@ -9,11 +32,15 @@ class MemN2N(object):
 
 
 class Encoder(object):
-    def __init__(self, data_set):
+    def __init__(self, data_set, d):
         self.vocab = data_set.vocab
+        self.V = len(self.vocab)
+        # d is embedding dimension
+        self.d = d
 
     def encode(self, sentence):
-        return [sum(self.equals(x, v) for x in sentence) for v in self.vocab]
+        X = np.array([[int(self.equals(x, v)) for x in sentence] for v in self.vocab])
+        return X
 
     def equals(self, a, b):
         return a == b
@@ -32,7 +59,7 @@ class QuestionInputLayer(object):
 
 
 class MemoryLayer(object):
-    def __init__(self, dim, A=None, C=None, encode_position=False):
+    def __init__(self, dim, A=None, C=None):
         self.dim = dim
         if A is None:
             A = tf.Variable(tf.truncated_normal(dim, stddev=0.1))
@@ -40,17 +67,13 @@ class MemoryLayer(object):
             C = tf.Variable(tf.truncated_normal(dim, stddev=0.1))
         self.A = A
         self.C = C
-        self.encode_position = encode_position
         self.AX_list = []
         self.CX_list = []
         self.p_list = []
         self.o_list = []
 
     def put(self, X, u):
-        if self.encode_position:
-            AX = None
-        else:
-            AX = tf.matmul(self.A, X)
+        AX = tf.matmul(self.A, X)
         CX = tf.matmul(self.C, X)
         p = tf.nn.softmax(tf.matmul(tf.transpose(AX), u)) # M^T . u
         o = tf.reduce_sum(tf.matmul(CX, tf.diag(p)), 1)
