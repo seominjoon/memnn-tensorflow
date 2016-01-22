@@ -7,16 +7,9 @@ sess = tf.InteractiveSession()
 
 
 x = tf.placeholder("float", shape=[50, 784])
-out = []
-for xi in tf.unpack(x):
-    add = tf.concat(0, [tf.constant(1.0/(i+1), dtype='float32') for i in range(784)])
-    new_xi = xi + add
-    out.append(new_xi)
-xx = tf.pack(out) + x
-print xx
 y_ = tf.placeholder("float", shape=[None, 10])
 
-W = tf.Variable(tf.truncated_normal([784, 10], stddev=1.0/math.sqrt(784)))
+W = tf.Variable(tf.truncated_normal([784, 10], stddev=1.0/math.sqrt(784))) * tf.ones([10])
 b = tf.Variable(tf.zeros([10]))
 y = tf.nn.softmax(tf.matmul(x, W) + b)
 
