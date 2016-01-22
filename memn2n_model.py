@@ -89,7 +89,7 @@ class MemN2NModel(object):
             self.B_em = EmbeddingModule(config, A_name='B')
 
         # memory layers
-        self.memory_layers = [MemoryLayer(config) for _ in range(num_layer)]
+        self.memory_layers = [MemoryLayer(config) for _ in range(config.num_layer)]
         
         # linear mapping
         if config.tying == 'rnn':

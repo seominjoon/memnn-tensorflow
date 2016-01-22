@@ -24,7 +24,6 @@ flags.DEFINE_string("data_suffix", "", "Suffix (before '_train.txt' or '_test.tx
 FLAGS = flags.FLAGS
 
 
-
 def main(_):
     # TODO : data read should get config file, and also pad zeros according to memory size, etc.
     train_ds, test_ds = data.read_babi(FLAGS)
@@ -34,3 +33,5 @@ def main(_):
         model = memn2n_model.MemN2NModel(FLAGS, session)
         model.train_data_set(train_ds, val_data_set=test_ds)
 
+if __name__ == "__main__":
+    tf.app.run()
