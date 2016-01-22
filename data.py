@@ -20,13 +20,18 @@ class DataSet(object):
 
     def next_batch(self, batch_size):
         assert batch_size <= self._num_examples, "batch size cannot be greater than data size."
-        if self._index_in_epoch + batch_size > self._num_examples:
-            self._index_in_epoch = 0
-            self._epochs_completed += 1
+        assert self.has_next(batch_size), "there is not batch left!"
         i, b = self._index_in_epoch, batch_size
         batch = self.xs[i:i + b], self.qs[i:i + b], self.ys[i:i + b]
         self._index_in_epoch += batch_size
         return batch
+
+    def has_next(self, batch_size):
+        return self._index_in_epoch + batch_size <= self._num_examples
+
+    def rewind(self):
+        self._index_in_epoch = 0
+        self._epochs_completed += 1
 
 
 def _tokenize(raw):
@@ -91,7 +96,7 @@ def read_babi_split(*file_paths_list):
     return data_sets
 
 
-def read_babi_all(dir_path, prefix="", suffix=""):
+def read_babi(dir_path, prefix="", suffix=""):
     train_file_paths = []
     test_file_paths = []
     for file_name in os.listdir(dir_path):
@@ -101,16 +106,6 @@ def read_babi_all(dir_path, prefix="", suffix=""):
         elif file_name.startswith(prefix) and file_name.endswith(suffix + "_test.txt"):
             test_file_paths.append(file_path)
     return read_babi_split(train_file_paths, test_file_paths)
-
-
-def read_babi(size='small', prefix="", suffix=""):
-    if size == 'small':
-        dir_path = "data/tasks_1-20_v1-2/en/"
-    elif size == 'large':
-        dir_path = "data/tasks_1-20_v1-2/en-10k/"
-    else:
-        raise Exception("Invalid size. Choose 'small' or 'large' (10k).")
-    return read_babi_all(dir_path, prefix=prefix, suffix=suffix)
 
 
 if __name__ == "__main__":
