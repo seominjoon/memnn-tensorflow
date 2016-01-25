@@ -26,7 +26,7 @@ FLAGS = flags.FLAGS
 
 def main(_):
     # TODO : data read should get config file, and also pad zeros according to memory size, etc.
-    train_ds, test_ds = data.read_babi(FLAGS)
+    train_ds, test_ds = data.read_babi(FLAGS.memory_size, FLAGS.data_dir)
     FLAGS.vocab_size = train_ds.vocab_size
 
     with tf.Session() as session:
