@@ -13,9 +13,7 @@ class DataSet(object):
         self.ys = ys
         self.vocab_size = vocab_size
         self.vocab_map = vocab_map
-        self.max_m_len = max(len(m) for m in xs)
-        self.max_s_len = max(len(mi) for m in xs for mi in m)
-        self.max_q_len = max(len(q) for q in qs)
+        self.sentence_size = np.shape(xs)[2]
         self._epochs_completed = 0
         self._index_in_epoch = 0
 

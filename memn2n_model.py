@@ -19,10 +19,10 @@ class EmbeddingModule(object):
         self.A, self.TA = A, TA
 
     def __call__(self, x_batch):
-        Ax_batch = tf.nn.embedding_lookup(self.A, x_batch)  # [B, M, J, d] or [B, J, d]
+        Ax_batch = tf.nn.embedding_lookup(self.A, x_batch)  # [B, M, J, d]
         if self.config.pe:
             Ax_batch *= EmbeddingModule._get_pe(self.config.sentence_size, self.config.hidden_size)
-        m_batch = tf.reduce_sum(Ax_batch, [-2])  # [B, M, d] or [B, d]
+        m_batch = tf.reduce_sum(Ax_batch, [2])  # [B, M, d]
         if self.config.te:
             m_batch += self.TA
         return m_batch
@@ -31,9 +31,9 @@ class EmbeddingModule(object):
     def _get_pe(sentence_size, hidden_size):
         key = (sentence_size, hidden_size)
         if key not in EmbeddingModule.l_dict:
-            f = lambda J, j, d, k: (1-j/J) - (k/d)*(1-2*j/J)
+            f = lambda J, j, d, k: (1-float(j)/J) - (float(k)/d)*(1-2.0*j/J)
             g = lambda j: tf.concat(0, [f(sentence_size, j, hidden_size, k) for k in range(hidden_size)])
-            l = tf.concat(0, [g(j) for j in range(sentence_size)])
+            l = tf.pack([g(j) for j in range(sentence_size)])
             EmbeddingModule.l_dict[key] = l
         return EmbeddingModule.l_dict[key]
 
@@ -45,7 +45,7 @@ class MemoryLayer(object):
     def __call__(self, m_batch, c_batch, u_batch):
         u_2d_batch = tf.expand_dims(u_batch, -1)
 
-        p_2d_batch = tf.nn.softmax(tf.batch_matmul(m_batch, u_2d_batch)) # [B, M, 1]
+        p_2d_batch = tf.expand_dims(tf.nn.softmax(tf.squeeze(tf.batch_matmul(m_batch, u_2d_batch))), -1) # [B, M, 1]
         p_tiled_batch = tf.tile(p_2d_batch, [1, 1, self.config.hidden_size])  # [B, M, d]
 
         o_batch = tf.reduce_sum(c_batch * p_tiled_batch, [1])  # [B d]
@@ -58,10 +58,9 @@ class MemN2NModel(object):
         self.session = session
 
         # place holders
-        self.x_batch = tf.placeholder('float', name='x', shape=[None, config.memory_size, config.sentence_size])
-        self.q_batch = tf.placeholder('float', name='q', shape=[None, config.sentence_size])
-        self.a_batch = tf.placeholder('float', name='a', shape=[None, config.vocab_size])
-        self.y_batch = tf.placeholder('float', name='y', shape=[None, config.vocab_size])
+        self.x_batch = tf.placeholder('int32', name='x', shape=[None, config.memory_size, config.sentence_size])
+        self.q_batch = tf.placeholder('int32', name='q', shape=[None, config.sentence_size])
+        self.y_batch = tf.placeholder('int32', name='y', shape=[None])
         self.learning_rate = tf.placeholder('float', name='lr')
 
         # input embedding
@@ -84,9 +83,12 @@ class MemN2NModel(object):
 
         # question embedding
         if config.tying == 'adj':
-            self.B_em = EmbeddingModule(config, self.A_ems[0], A_name='B')
+            self.B_em = EmbeddingModule(config, self.A_ems[0])
         else:
-            self.B_em = EmbeddingModule(config, A_name='B')
+            self.B_em = EmbeddingModule(config, A_name='B', TA_name='TB')
+
+        # label -> one-hot vector
+        self.v_batch = tf.nn.embedding_lookup(tf.diag(tf.ones([self.config.vocab_size])), self.y_batch)
 
         # memory layers
         self.memory_layers = [MemoryLayer(config) for _ in range(config.num_layer)]
@@ -102,7 +104,8 @@ class MemN2NModel(object):
             self.W = tf.get_variable('W', shape=[config.hidden_size, config.vocab_size])
 
         # connect tensors
-        u_batch = self.B_em(self.q_batch)
+        # TODO : this can be simplified if we figure out how to count dimension backward
+        u_batch = tf.squeeze(self.B_em(tf.expand_dims(self.q_batch, 1)))
         for i, (A_em, C_em, memory_layer) in enumerate(zip(self.A_ems, self.C_ems, self.memory_layers)):
             o_batch = memory_layer(A_em(self.x_batch), C_em(self.x_batch), u_batch)
             if config.tying == 'rnn':
@@ -113,14 +116,16 @@ class MemN2NModel(object):
         self.a_batch = tf.nn.softmax(tf.matmul(u_batch, self.W))
 
         # accuracy tensor
-        correct_prediction = tf.equal(tf.argmax(self.a_batch, 1), tf.argmax(self.y_batch, 1))
+        correct_prediction = tf.equal(tf.argmax(self.a_batch, 1), tf.argmax(self.v_batch, 1))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
 
         # loss tensor
-        self.loss = -tf.reduce_sum(self.y_batch * tf.log(self.a_batch))
+        self.loss = -tf.reduce_sum(self.v_batch * tf.log(self.a_batch))
 
         # optimizer
         self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+
+        tf.initialize_all_variables().run()
 
     def train(self, x_batch, q_batch, y_batch, learning_rate):
         self.optimizer.run(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch,
@@ -148,6 +153,7 @@ class MemN2NModel(object):
                 print self.test_data_set(val_data_set)
 
     def test(self, x_batch, q_batch, y_batch):
+        print self.a_batch.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})
         return self.accuracy.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})
 
     def test_data_set(self, data_set):

@@ -16,6 +16,9 @@ flags.DEFINE_float("anneal_ratio", 0.5, "Annealing ratio [0.5]")
 flags.DEFINE_integer("anneal_period", 25, "Number of epochs for every annealing [25]")
 flags.DEFINE_float("max_grad_norm", 40, "Max gradient norm; above this number is clipped [40]")
 flags.DEFINE_integer("num_epoch", 60, "Total number of epochs for training [60]")
+flags.DEFINE_boolean("te", False, "Temporal encoding enabled? 'True' or 'False' [False]")
+flags.DEFINE_boolean("pe", False, "Position encoding enabled? 'True' or 'False' [False]")
+flags.DEFINE_string("tying", 'rnn', "Indicate tying method: 'adj' or 'rnn' [rnn]")
 
 flags.DEFINE_string("data_dir", 'data/tasks_1-20_v1-2/en/', "Data folder directory [data/tasks_1-20_v1-2/en]")
 flags.DEFINE_string("data_prefix", "qa1_", "Prefix for file names to fetch in data_dir [qa1_]")
@@ -26,8 +29,11 @@ FLAGS = flags.FLAGS
 
 def main(_):
     # TODO : data read should get config file, and also pad zeros according to memory size, etc.
-    train_ds, test_ds = data.read_babi(FLAGS.memory_size, FLAGS.data_dir)
+    train_ds, test_ds = data.read_babi(FLAGS.memory_size, FLAGS.data_dir, prefix=FLAGS.data_prefix, suffix=FLAGS.data_suffix)
     FLAGS.vocab_size = train_ds.vocab_size
+    FLAGS.sentence_size = train_ds.sentence_size
+
+    print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.sentence_size)
 
     with tf.Session() as session:
         model = memn2n_model.MemN2NModel(FLAGS, session)
