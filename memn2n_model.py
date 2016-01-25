@@ -8,14 +8,15 @@ class EmbeddingModule(object):
 
     def __init__(self, config, em=None, A=None, A_name="", TA=None, TA_name=""):
         self.config = config
+        default_initializer = tf.random_normal_initializer(config.init_mean, config.init_std)
         M, J, d, V = config.memory_size, config.sentence_size, config.hidden_size, config.vocab_size
         if em is not None:
             A, TA = em.A, em.TA
         if A is None:
-            A = tf.get_variable(A_name, shape=[V, d])
+            A = tf.get_variable(A_name, shape=[V, d], initializer=default_initializer)
         if config.te:
             if TA is None:
-                TA = tf.get_variable(TA_name, shape=[M, d])
+                TA = tf.get_variable(TA_name, shape=[M, d], initializer=default_initializer)
         self.A, self.TA = A, TA
 
     def __call__(self, x_batch):
@@ -25,6 +26,7 @@ class EmbeddingModule(object):
         m_batch = tf.reduce_sum(Ax_batch, [2])  # [B, M, d]
         if self.config.te:
             m_batch += self.TA
+        m_batch = tf.Print(m_batch, [m_batch])
         return m_batch
 
     @staticmethod
@@ -55,7 +57,8 @@ class MemoryLayer(object):
 class MemN2NModel(object):
     def __init__(self, config, session):
         self.config = config
-        self.session = session
+
+        default_initializer = tf.random_normal_initializer(config.init_mean, config.init_std)
 
         # place holders
         self.x_batch = tf.placeholder('int32', name='x', shape=[None, config.memory_size, config.sentence_size])
@@ -95,13 +98,13 @@ class MemN2NModel(object):
         
         # linear mapping
         if config.tying == 'rnn':
-            self.H = tf.get_variable('H', shape=[config.hidden_size, config.hidden_size])
+            self.H = tf.get_variable('H', shape=[config.hidden_size, config.hidden_size], initializer=default_initializer)
 
         # output mapping
         if config.tying == 'adj':
             self.W = tf.transpose(self.C_ems[-1].A)
         elif config.tying == 'rnn':
-            self.W = tf.get_variable('W', shape=[config.hidden_size, config.vocab_size])
+            self.W = tf.get_variable('W', shape=[config.hidden_size, config.vocab_size], initializer=default_initializer)
 
         # connect tensors
         # TODO : this can be simplified if we figure out how to count dimension backward
@@ -113,14 +116,14 @@ class MemN2NModel(object):
             u_batch = u_batch + o_batch
 
         # output tensor
-        self.a_batch = tf.nn.softmax(tf.matmul(u_batch, self.W))
+        self.unscaled_a_batch = tf.matmul(u_batch, self.W)
 
         # accuracy tensor
-        correct_prediction = tf.equal(tf.argmax(self.a_batch, 1), tf.argmax(self.v_batch, 1))
+        correct_prediction = tf.equal(tf.argmax(self.unscaled_a_batch, 1), tf.argmax(self.v_batch, 1))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
 
         # loss tensor
-        self.loss = -tf.reduce_sum(self.v_batch * tf.log(self.a_batch))
+        self.loss = -tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(self.unscaled_a_batch, self.v_batch))
 
         # optimizer
         self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
@@ -153,7 +156,7 @@ class MemN2NModel(object):
                 print self.test_data_set(val_data_set)
 
     def test(self, x_batch, q_batch, y_batch):
-        print self.a_batch.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})
+        # print sum(sum(self.v_batch.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})))
         return self.accuracy.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})
 
     def test_data_set(self, data_set):
