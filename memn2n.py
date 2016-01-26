@@ -8,7 +8,7 @@ flags = tf.app.flags
 flags.DEFINE_integer("batch_size", 32, "Batch size during training [32]")
 flags.DEFINE_integer("memory_size", 50, "Memory size [50]")
 flags.DEFINE_integer("hidden_size", 20, "Embedding dimension [20]")
-flags.DEFINE_integer("num_layer", 6, "Number of memory layers (hops) [6]")
+flags.DEFINE_integer("num_layer", 3, "Number of memory layers (hops) [3]")
 flags.DEFINE_float("init_mean", 0.1, "Initial weight mean [0.1]")
 flags.DEFINE_float("init_std", 0.05, "Initial weight std [0.05]")
 flags.DEFINE_float("init_lr", 0.01, "Initial learning rate [0.01]")
