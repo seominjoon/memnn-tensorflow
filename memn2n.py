@@ -28,12 +28,11 @@ FLAGS = flags.FLAGS
 
 
 def main(_):
-    # TODO : data read should get config file, and also pad zeros according to memory size, etc.
-    train_ds, test_ds = data.read_babi(FLAGS.memory_size, FLAGS.data_dir, prefix=FLAGS.data_prefix, suffix=FLAGS.data_suffix)
+    train_ds, test_ds = data.read_babi(FLAGS.data_dir, prefix=FLAGS.data_prefix, suffix=FLAGS.data_suffix)
     FLAGS.vocab_size = train_ds.vocab_size
-    FLAGS.sentence_size = train_ds.sentence_size
+    FLAGS.max_sentence_size = train_ds.max_sentence_size
 
-    print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.sentence_size)
+    print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.max_sentence_size)
 
     with tf.Session() as session:
         model = memn2n_model.MemN2NModel(FLAGS, session)

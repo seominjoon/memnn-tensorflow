@@ -1,5 +1,6 @@
 import itertools
 import tensorflow as tf
+import numpy as np
 
 from data import DataSet
 
@@ -11,7 +12,7 @@ class EmbeddingModule(object):
         self.config = config
         self.te = te
         default_initializer = tf.random_normal_initializer(config.init_mean, config.init_std)
-        M, J, d, V = config.memory_size, config.sentence_size, config.hidden_size, config.vocab_size
+        M, J, d, V = config.memory_size, config.max_sentence_size, config.hidden_size, config.vocab_size
         if em is None:
             self.inherited = False
             self.name = name
@@ -32,20 +33,23 @@ class EmbeddingModule(object):
             if self.te:
                 self.init_variables.append(self.TA)
 
-    def __call__(self, x_batch):
-        Ax_batch = tf.nn.embedding_lookup(self.A, x_batch)  # [B, M, J, d]
+    def __call__(self, x_batch, x_mask_batch=None, m_mask_batch=None):
+        Ax_batch = tf.nn.embedding_lookup(self.A, x_batch)  # [N, M, J, d]
         if self.config.pe:
-            Ax_batch *= EmbeddingModule._get_pe(self.config.sentence_size, self.config.hidden_size)
-        m_batch = tf.reduce_sum(Ax_batch, [2])  # [B, M, d]
+            Ax_batch *= EmbeddingModule._get_pe(self.config.max_sentence_size, self.config.hidden_size)
+        if x_mask_batch is not None:
+            x_mask_4d_batch = tf.expand_dims(x_mask_batch, -1)  # [N, M, J, 1]
+            x_mask_tiled_batch = tf.tile(x_mask_4d_batch, [1, 1, 1, self.config.hidden_size])  # [N, M, J, d]
+            Ax_batch = Ax_batch * x_mask_tiled_batch
+        m_batch = tf.reduce_sum(Ax_batch, [2])  # [N, M, d]
         if self.te:
             m_batch += self.TA  # broadcasting
-        # m_batch = tf.Print(m_batch, [m_batch], self.name)
+        if m_mask_batch is not None:
+            m_mask_4d_batch = tf.expand_dims(m_mask_batch, -1)  # [N, M, 1]
+            m_mask_tiled_batch = tf.tile(m_mask_4d_batch, [1, 1, self.config.hidden_size])  # [N, M, d]
+            m_batch = m_batch * m_mask_tiled_batch
         self.m_batch = m_batch
         return m_batch
-
-    def variables(self):
-        out = []
-        return out
 
     @staticmethod
     def _get_pe(sentence_size, hidden_size):
@@ -69,10 +73,10 @@ class MemoryLayer(object):
         u_2d_batch = tf.expand_dims(u_batch, -1)
 
         p_batch = tf.nn.softmax(tf.squeeze(tf.batch_matmul(m_batch, u_2d_batch)))
-        p_2d_batch = tf.expand_dims(p_batch, -1) # [B, M, 1]
-        p_tiled_batch = tf.tile(p_2d_batch, [1, 1, self.config.hidden_size])  # [B, M, d]
+        p_2d_batch = tf.expand_dims(p_batch, -1) # [N, M, 1]
+        p_tiled_batch = tf.tile(p_2d_batch, [1, 1, self.config.hidden_size])  # [N, M, d]
 
-        o_batch = tf.reduce_sum(c_batch * p_tiled_batch, [1])  # [B d]
+        o_batch = tf.reduce_sum(c_batch * p_tiled_batch, [1])  # [N d]
 
         self.p_batch = p_batch
         self.o_batch = o_batch
@@ -86,10 +90,14 @@ class MemN2NModel(object):
         default_initializer = tf.random_normal_initializer(config.init_mean, config.init_std)
 
         # place holders
-        self.x_batch = tf.placeholder('int32', name='x', shape=[None, config.memory_size, config.sentence_size])
-        self.q_batch = tf.placeholder('int32', name='q', shape=[None, config.sentence_size])
+        self.x_batch = tf.placeholder('int32', name='x', shape=[None, config.memory_size, config.max_sentence_size])
+        self.q_batch = tf.placeholder('int32', name='q', shape=[None, config.max_sentence_size])
         self.y_batch = tf.placeholder('int32', name='y', shape=[None])
         self.learning_rate = tf.placeholder('float', name='lr')
+
+        self.x_mask_batch = tf.placeholder('float', name='x_mask', shape=[None, config.memory_size, config.max_sentence_size])
+        self.q_mask_batch = tf.placeholder('float', name='q_mask', shape=[None, config.max_sentence_size])
+        self.m_mask_batch = tf.placeholder('float', name='m_mask', shape=[None, config.memory_size])
 
         # input embedding
         self.A_ems, self.C_ems = [], []
@@ -133,9 +141,10 @@ class MemN2NModel(object):
 
         # connect tensors
         # TODO : this can be simplified if we figure out how to count dimension backward
-        u_batch = tf.squeeze(self.B_em(tf.expand_dims(self.q_batch, 1)))
+        u_batch = tf.squeeze(self.B_em(tf.expand_dims(self.q_batch, 1), tf.expand_dims(self.q_mask_batch, 1)))
         for i, (A_em, C_em, memory_layer) in enumerate(zip(self.A_ems, self.C_ems, self.memory_layers)):
-            o_batch = memory_layer(A_em(self.x_batch), C_em(self.x_batch), u_batch)
+            o_batch = memory_layer(A_em(self.x_batch, self.x_mask_batch, self.m_mask_batch),
+                                   C_em(self.x_batch, self.x_mask_batch, self.m_mask_batch), u_batch)
             if config.tying == 'rnn':
                 u_batch = tf.matmul(u_batch, self.H)
             u_batch = u_batch + o_batch
@@ -154,29 +163,18 @@ class MemN2NModel(object):
         opt = tf.train.GradientDescentOptimizer(self.learning_rate)
 
         # gradient clipping
-        variables = []
-        for em in self.A_ems:
-            variables.extend(em.init_variables)
-        for em in self.C_ems:
-            variables.extend(em.init_variables)
-        if config.tying != 'adj':
-            variables.extend(self.B_em.variables())
-        if config.tying == 'rnn':
-            variables.append(self.H)
-            variables.append(self.W)
-
         # self.loss = tf.Print(self.loss, [tf.argmax(self.v_batch, 1), tf.argmax(self.unscaled_a_batch, 1)])
         grads_and_vars = opt.compute_gradients(self.loss)
         clipped_grads_and_vars = [(tf.clip_by_norm(grad, config.max_grad_norm), var) for grad, var in grads_and_vars]
         self.opt_op = opt.apply_gradients(clipped_grads_and_vars)
-        # self.opt_op = opt.minimize(self.loss)
-
-        # self.optimizer = optimizer_handler.minimize(self.loss)
 
         tf.initialize_all_variables().run()
 
     def train(self, x_batch, q_batch, y_batch, learning_rate):
-        self.opt_op.run(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch,
+        (reg_x_batch, x_mask_batch, m_mask_batch), (reg_q_batch, q_mask_batch) = self._preprocess(x_batch, q_batch)
+
+        self.opt_op.run(feed_dict={self.x_batch: reg_x_batch, self.q_batch: reg_q_batch, self.y_batch: y_batch,
+                                   self.x_mask_batch: x_mask_batch, self.q_mask_batch: q_mask_batch, self.m_mask_batch: m_mask_batch,
                                    self.learning_rate: learning_rate})
 
     def train_data_set(self, train_data_set, val_data_set=None, val_period=1):
@@ -201,9 +199,36 @@ class MemN2NModel(object):
                 print self.test_data_set(val_data_set), lr
 
     def test(self, x_batch, q_batch, y_batch):
-        # print sum(sum(self.v_batch.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})))
-        return self.accuracy.eval(feed_dict={self.x_batch: x_batch, self.q_batch: q_batch, self.y_batch: y_batch})
+        (reg_x_batch, x_mask_batch, m_mask_batch), (reg_q_batch, q_mask_batch) = self._preprocess(x_batch, q_batch)
+
+        return self.accuracy.eval(feed_dict={self.x_batch: reg_x_batch, self.q_batch: reg_q_batch, self.y_batch: y_batch,
+                                             self.x_mask_batch: x_mask_batch, self.q_mask_batch: q_mask_batch,
+                                             self.m_mask_batch: m_mask_batch})
 
     def test_data_set(self, data_set):
         assert isinstance(data_set, DataSet)
         return self.test(data_set.xs, data_set.qs, data_set.ys)
+
+    def _preprocess(self, x_batch, q_batch):
+        data_size = len(x_batch)
+        reg_x_batch = np.zeros([data_size, self.config.memory_size, self.config.max_sentence_size])
+        reg_q_batch = np.zeros([data_size, self.config.max_sentence_size])
+        x_mask_batch = np.zeros([data_size, self.config.memory_size, self.config.max_sentence_size])
+        q_mask_batch = np.zeros([data_size, self.config.max_sentence_size])
+        m_mask_batch = np.zeros([data_size, self.config.memory_size])
+
+        for n, i, j in np.ndindex(reg_x_batch.shape):
+            if i < len(x_batch[n]) and j < len(x_batch[n][-i-1]):
+                reg_x_batch[n, i, j] = x_batch[n][-i-1][j]
+                x_mask_batch[n, i, j] = 1
+
+        for n, j in np.ndindex(reg_q_batch.shape):
+            if j < len(q_batch[n]):
+                reg_q_batch[n, j] = q_batch[n][j]
+                q_mask_batch[n, j] = 1
+
+        for n, i in np.ndindex(m_mask_batch.shape):
+            if i < len(x_batch[n]):
+                m_mask_batch[n, i] = 1
+
+        return (reg_x_batch, x_mask_batch, m_mask_batch), (reg_q_batch, q_mask_batch)
