@@ -1,4 +1,3 @@
-import itertools
 import tensorflow as tf
 import numpy as np
 
@@ -67,13 +66,16 @@ class MemoryLayer(object):
     def __init__(self, config, layer_name=None):
         self.config = config
 
-    def __call__(self, m_batch, c_batch, u_batch):
+    def __call__(self, m_batch, c_batch, u_batch, m_mask_batch):
         self.c_batch = c_batch
         self.u_batch = u_batch
         u_2d_batch = tf.expand_dims(u_batch, -1)
 
-        p_batch = tf.nn.softmax(tf.squeeze(tf.batch_matmul(m_batch, u_2d_batch)))
-        p_2d_batch = tf.expand_dims(p_batch, -1) # [N, M, 1]
+        # softmax (can't use nn.softmax because we need to mask the memory)
+        mu_batch = tf.squeeze(tf.batch_matmul(m_batch, u_2d_batch))  # [N, M]
+        p_batch = MemoryLayer._softmax_with_mask(mu_batch, m_mask_batch, self.config.memory_size)
+
+        p_2d_batch = tf.expand_dims(p_batch, -1)  # [N, M, 1]
         p_tiled_batch = tf.tile(p_2d_batch, [1, 1, self.config.hidden_size])  # [N, M, d]
 
         o_batch = tf.reduce_sum(c_batch * p_tiled_batch, [1])  # [N d]
@@ -81,6 +83,15 @@ class MemoryLayer(object):
         self.p_batch = p_batch
         self.o_batch = o_batch
         return o_batch
+
+    @staticmethod
+    def _softmax_with_mask(x_batch, x_mask_batch, dim):
+        exp_x_batch = tf.exp(x_batch)
+        masked_batch = exp_x_batch * x_mask_batch
+        sum_2d_batch =  tf.tile(tf.expand_dims(tf.reduce_sum(masked_batch, [1]), -1), [1, dim])
+        p_batch = masked_batch / sum_2d_batch  # [N, M]
+        return p_batch
+
 
 
 class MemN2NModel(object):
@@ -144,7 +155,7 @@ class MemN2NModel(object):
         u_batch = tf.squeeze(self.B_em(tf.expand_dims(self.q_batch, 1), tf.expand_dims(self.q_mask_batch, 1)))
         for i, (A_em, C_em, memory_layer) in enumerate(zip(self.A_ems, self.C_ems, self.memory_layers)):
             o_batch = memory_layer(A_em(self.x_batch, self.x_mask_batch, self.m_mask_batch),
-                                   C_em(self.x_batch, self.x_mask_batch, self.m_mask_batch), u_batch)
+                                   C_em(self.x_batch, self.x_mask_batch, self.m_mask_batch), u_batch, self.m_mask_batch)
             if config.tying == 'rnn':
                 u_batch = tf.matmul(u_batch, self.H)
             u_batch = u_batch + o_batch
@@ -162,13 +173,17 @@ class MemN2NModel(object):
         # optimizer
         opt = tf.train.GradientDescentOptimizer(self.learning_rate)
 
-        # gradient clipping
-        # self.loss = tf.Print(self.loss, [tf.argmax(self.v_batch, 1), tf.argmax(self.unscaled_a_batch, 1)])
-        grads_and_vars = opt.compute_gradients(self.loss)
-        clipped_grads_and_vars = [(tf.clip_by_norm(grad, config.max_grad_norm), var) for grad, var in grads_and_vars]
-        self.opt_op = opt.apply_gradients(clipped_grads_and_vars)
+        # minimize with gradient clipping
+        self.opt_op = MemN2NModel._minimize_with_grad_clip(opt, self.loss, config.max_grad_norm)
 
         tf.initialize_all_variables().run()
+
+    @staticmethod
+    def _minimize_with_grad_clip(opt, loss, max_grad_norm):
+        grads_and_vars = opt.compute_gradients(loss)
+        clipped_grads_and_vars = [(tf.clip_by_norm(grad, max_grad_norm), var) for grad, var in grads_and_vars]
+        opt_op = opt.apply_gradients(clipped_grads_and_vars)
+        return opt_op
 
     def train(self, x_batch, q_batch, y_batch, learning_rate):
         (reg_x_batch, x_mask_batch, m_mask_batch), (reg_q_batch, q_mask_batch) = self._preprocess(x_batch, q_batch)
