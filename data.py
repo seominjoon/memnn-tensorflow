@@ -31,6 +31,11 @@ class DataSet(object):
     def rewind(self):
         self._index_in_epoch = 0
         self._epochs_completed += 1
+        """
+        xqys = zip(self.xs, self.qs, self.ys)
+        np.random.shuffle(xqys)
+        self.xs, self.qs, self.ys = zip(*xqys)
+        """
 
 
 def _tokenize(raw):
