@@ -2,6 +2,7 @@ import os
 import re
 import logging
 from pprint import pprint
+import numpy as np
 
 class DataSet(object):
     def __init__(self, xs, qs, ys, max_sentence_size=None, vocab_size=None, vocab_map=None):
@@ -30,11 +31,9 @@ class DataSet(object):
     def rewind(self):
         self._index_in_epoch = 0
         self._epochs_completed += 1
-        """
         xqys = zip(self.xs, self.qs, self.ys)
         np.random.shuffle(xqys)
         self.xs, self.qs, self.ys = zip(*xqys)
-        """
 
 
 def _tokenize(raw):
@@ -114,6 +113,10 @@ def read_babi(dir_path, prefix="", suffix=""):
         elif file_name.startswith(prefix) and file_name.endswith(suffix + "_test.txt"):
             test_file_paths.append(file_path)
     return read_babi_split(train_file_paths, test_file_paths)
+
+
+def split_val(data_set, ratio):
+    pass
 
 
 if __name__ == "__main__":
