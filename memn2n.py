@@ -9,9 +9,10 @@ flags.DEFINE_integer("batch_size", 32, "Batch size during training [32]")
 flags.DEFINE_integer("memory_size", 50, "Memory size [50]")
 flags.DEFINE_integer("hidden_size", 20, "Embedding dimension [20]")
 flags.DEFINE_integer("num_layer", 3, "Number of memory layers (hops) [3]")
-flags.DEFINE_float("init_mean", 0.1, "Initial weight mean [0.1]")
-flags.DEFINE_float("init_std", 0.05, "Initial weight std [0.05]")
-flags.DEFINE_float("init_lr", 0.01, "Initial learning rate [0.01]")
+flags.DEFINE_float("init_mean", 0, "Initial weight mean [0]")
+flags.DEFINE_float("init_std", 0.1, "Initial weight std [0.1]")
+flags.DEFINE_float("init_lr", 0.005, "Initial learning rate [0.005]")
+flags.DEFINE_boolean("ls", True, "Start training with linear model? [True]")
 flags.DEFINE_float("anneal_ratio", 0.5, "Annealing ratio [0.5]")
 flags.DEFINE_integer("anneal_period", 25, "Number of epochs for every annealing [25]")
 flags.DEFINE_float("max_grad_norm", 40, "Max gradient norm; above this number is clipped [40]")
@@ -36,7 +37,7 @@ def main(_):
 
     with tf.Session() as session:
         model = memn2n_model.MemN2NModel(FLAGS, session)
-        model.train_data_set(train_ds, val_data_set=test_ds)
+        model.train_data_set(train_ds, test_ds)
 
 if __name__ == "__main__":
     tf.app.run()
