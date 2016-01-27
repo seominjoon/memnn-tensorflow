@@ -19,7 +19,7 @@ flags.DEFINE_float("max_grad_norm", 40, "Max gradient norm; above this number is
 flags.DEFINE_integer("num_epoch", 100, "Total number of epochs for training [100]")
 flags.DEFINE_boolean("te", True, "Temporal encoding enabled? 'True' or 'False' [True]")
 flags.DEFINE_boolean("pe", True, "Position encoding enabled? 'True' or 'False' [True]")
-flags.DEFINE_string("tying", 'rnn', "Indicate tying method: 'adj' or 'rnn' [rnn]")
+flags.DEFINE_string("tying", 'adj', "Indicate tying method: 'adj' or 'rnn' [adj]")
 
 flags.DEFINE_string("data_dir", 'data/tasks_1-20_v1-2/en/', "Data folder directory [data/tasks_1-20_v1-2/en]")
 flags.DEFINE_string("data_prefix", "qa1_", "Prefix for file names to fetch in data_dir [qa1_]")

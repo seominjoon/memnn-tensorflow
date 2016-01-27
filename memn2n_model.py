@@ -122,11 +122,11 @@ class MemN2NModel(object):
                 C_em = EmbeddingModule(config, te=config.te, name='C%d' % i)
             else:
                 if config.tying == 'adj':
-                    A_em = EmbeddingModule(config, C_em)
+                    A_em = EmbeddingModule(config, self.C_ems[-1])
                     C_em = EmbeddingModule(config, te=config.te, name='C%d' % i)
                 elif config.tying == 'rnn':
-                    A_em = EmbeddingModule(config, A_em)
-                    C_em = EmbeddingModule(config, C_em)
+                    A_em = EmbeddingModule(config, self.A_ems[-1])
+                    C_em = EmbeddingModule(config, self.C_ems[-1])
                 else:
                     raise Exception("undefined tying method")
             self.A_ems.append(A_em)
