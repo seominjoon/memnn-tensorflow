@@ -50,8 +50,4 @@ crashlytics-build.properties
 *.pyc
 
 data
-MNIST_data
-data
-checkpoint
-
-
+logs

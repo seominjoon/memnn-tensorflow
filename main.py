@@ -39,11 +39,10 @@ def main(_):
     print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.max_sentence_size)
 
     graph = tf.Graph()
-    model = Model(graph, FLAGS)
+    model = Model(graph, FLAGS, logdir="logs/")
     with tf.Session(graph=graph) as sess:
-        writer = tf.train.SummaryWriter('logs/', sess.graph_def)
         sess.run(tf.initialize_all_variables())
-        # model.train(sess, train_ds, test_ds)
+        model.train(sess, train_ds, test_ds)
 
 if __name__ == "__main__":
     tf.app.run()

@@ -5,7 +5,7 @@ from data import DataSet
 
 
 class Model(object):
-    def __init__(self, graph, params):
+    def __init__(self, graph, params, logdir=None):
         self.graph = graph
         with graph.as_default():
             self.params = params
@@ -13,6 +13,11 @@ class Model(object):
             self.train_tensors = self._build_graph('train')
             self.val_tensors = self._build_graph('val')
             self.test_tensors = self._build_graph('test')
+
+            if logdir is not None:
+                self.writer = tf.train.SummaryWriter(logdir, graph.as_graph_def())
+            else:
+                self.writer = None
 
     def _init_variables(self):
         params = self.params
@@ -75,6 +80,8 @@ class Model(object):
             pass
         tensors = Tensors()
 
+        summaries = []
+
         # initialize tensors
         with tf.variable_scope(mode):
             # placeholders
@@ -135,18 +142,20 @@ class Model(object):
                 ap_batch = tf.nn.softmax(tf.matmul(last_u_batch, W), name='ap')  # [N d] X [d V] = [N V]
 
             with tf.name_scope('loss'):
-                loss = tf.nn.softmax_cross_entropy_with_logits(ap_batch, a_batch, name='loss')
+                loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(ap_batch, a_batch, name='loss'), 0)
                 tensors.loss = loss
+                summaries.append(tf.scalar_summary('loss', loss))
 
+            with tf.name_scope('acc'):
+                correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
+                acc = tf.reduce_mean(tf.cast(correct, 'float'), name='acc')
+                tensors.acc = acc
             if mode == 'train':
                 opt = tf.train.GradientDescentOptimizer(learning_rate)
                 opt_op = opt.minimize(loss)
                 tensors.opt_op = opt_op
-            elif mode == 'test' or mode == 'val':
-                with tf.name_scope('acc'):
-                    correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
-                    acc = tf.reduce_mean(tf.cast(correct, 'float'), name='acc')
-                    tensors.acc = acc
+
+        tensors.summary = tf.merge_summary(summaries)
 
         return tensors
 
@@ -160,7 +169,10 @@ class Model(object):
         # Need to initialize all variables in sess before training!
         tensors = self.train_tensors
         feed_dict = self._get_feed_dict(tensors, x, q, y)
-        _, loss = sess.run([tensors.opt_op, tensors.loss], feed_dict=feed_dict)
+        ops = [tensors.opt_op]
+        if self.writer is not None:
+            ops.append(self.train_tensors.summary)
+        return sess.run(ops, feed_dict=feed_dict)
 
     def train(self, sess, train_data_set, val_data_set, eval_period=1):
         assert isinstance(train_data_set, DataSet)
@@ -170,8 +182,12 @@ class Model(object):
         batch_size = params.train_batch_size
         for epoch_idx in xrange(num_epochs):
             while train_data_set.has_next(batch_size):
+                global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
                 x, q, y = train_data_set.next_batch(batch_size)
-                self.train_batch(sess, x, q, y)
+                result = self.train_batch(sess, x, q, y)
+                if self.writer is not None:
+                    self.writer.add_summary(result[1], global_idx)
+
             train_data_set.rewind()
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
                 loss, acc = self.test(sess, val_data_set, 'val')
@@ -189,7 +205,7 @@ class Model(object):
 
         feed_dict = self._get_feed_dict(tensors, x, q, y)
         loss, acc = sess.run([tensors.loss, tensors.acc], feed_dict=feed_dict)
-        return sum(loss), acc
+        return loss, acc
 
     def _preprocess(self, x_raw_batch, q_raw_batch):
         params = self.params
