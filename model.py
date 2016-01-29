@@ -132,6 +132,7 @@ class Model(object):
                 with tf.name_scope('q'):
                     q_batch = tf.placeholder('int32', shape=[N, J], name='q')
                     q_mask_batch = tf.placeholder('float', shape=[N, J], name='q_mask')
+                    q_mask_aug_batch = tf.expand_dims(q_mask_batch, -1, 'q_mask_aug')
                     tensors.q = q_batch
                     tensors.q_mask = q_mask_batch
 
@@ -150,7 +151,10 @@ class Model(object):
 
             with tf.name_scope('first_u'):
                 Bq_batch = tf.nn.embedding_lookup(B, q_batch)  # [N, J, d]
-                first_u_batch = tf.reduce_sum(tf.expand_dims(q_mask_batch, -1) * Bq_batch, 1, name='first_u')  # [N, d]
+                Bq_batch *= q_mask_aug_batch
+                if params.position_encoding:
+                    Bq_batch *= l_aug
+                first_u_batch = tf.reduce_sum(Bq_batch, 1, name='first_u')  # [N, d]
 
             u_batch_list = []
             o_batch_list = []
@@ -194,8 +198,8 @@ class Model(object):
                 last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
 
             with tf.name_scope('ap'):
-                ap_raw_batch = tf.matmul(last_u_batch, W, name='ap_raw')
-                ap_batch = tf.nn.softmax(ap_raw_batch, name='ap')  # [N d] X [d V] = [N V]
+                ap_raw_batch = tf.matmul(last_u_batch, W, name='ap_raw')  # [N d] X [d V] = [N V]
+                ap_batch = tf.nn.softmax(ap_raw_batch, name='ap')
 
             with tf.name_scope('loss'):
                 loss = tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch, name='loss')
