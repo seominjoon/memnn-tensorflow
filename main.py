@@ -1,7 +1,6 @@
 import tensorflow as tf
 
 import data
-import memn2n_model
 from model import Model
 
 flags = tf.app.flags

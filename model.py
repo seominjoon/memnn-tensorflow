@@ -17,6 +17,7 @@ class Model(object):
             with graph.device(device_for_node):
                 self.variables = self._init_variables()
                 self.train_tensors = self._build_graph('train')
+                self.linear_train_tensors = self._build_graph('train', linear=True)
                 self.val_tensors = self._build_graph('val')
                 self.test_tensors = self._build_graph('test')
                 if log_dir is not None:
@@ -32,6 +33,8 @@ class Model(object):
             pass
 
         variables = Variables()
+        global_step = tf.Variable(0, trainable=False, name='global_step')
+        variables.global_step = global_step
         with tf.variable_scope("var", initializer=tf.random_normal_initializer(params.init_mean, params.init_std)):
             As, TAs, Cs, TCs = [], [], [], []
             for layer_index in xrange(params.num_layers):
@@ -93,7 +96,7 @@ class Model(object):
         p_batch = tf.div(masked_batch, sum_2d_batch, name='p')  # [N, M]
         return p_batch
 
-    def _build_graph(self, mode):
+    def _build_graph(self, mode, linear=False):
         params = self.params
         variables = self.variables
         M, J, V, d = params.memory_size, params.max_sentence_size, params.vocab_size, params.hidden_size
@@ -184,8 +187,11 @@ class Model(object):
 
                     with tf.name_scope('p'):
                         u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
-                        um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])
-                        p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
+                        um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])  # [N, M]
+                        if linear:
+                            p_batch = tf.identity(um_batch, name='p')
+                        else:
+                            p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
 
                     with tf.name_scope('o'):
                         o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
@@ -203,9 +209,9 @@ class Model(object):
                 ap_batch = tf.nn.softmax(ap_raw_batch, name='ap')
 
             with tf.name_scope('loss'):
-                loss = tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch, name='loss')
+                loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch), 0, name='loss')
                 tensors.loss = loss
-                summaries.append(tf.scalar_summary('loss', tf.reduce_sum(loss, 0)))
+                summaries.append(tf.scalar_summary('loss', loss))
 
             with tf.name_scope('acc'):
                 correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
@@ -213,13 +219,11 @@ class Model(object):
                 tensors.acc = acc
 
             if mode == 'train':
-                global_step = tf.Variable(0, trainable=False, name='global_step')
                 opt = tf.train.GradientDescentOptimizer(learning_rate)
                 grads_and_vars = opt.compute_gradients(loss)
                 clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
-                opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=global_step)
+                opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=self.variables.global_step)
                 tensors.opt_op = opt_op
-                tensors.global_step = global_step
 
         tensors.summary = tf.merge_summary(summaries)
 
@@ -231,15 +235,16 @@ class Model(object):
                      tensors.q: q, tensors.q_mask: q_mask, tensors.y: y}
         return feed_dict
 
-    def train_batch(self, sess, x, q, y, learning_rate):
+    def train_batch(self, sess, tensors, x, q, y, learning_rate, eval_tensors=None):
         # Need to initialize all variables in sess before training!
-        tensors = self.train_tensors
         feed_dict = self._get_feed_dict(tensors, x, q, y)
         feed_dict[tensors.learning_rate] = learning_rate
-        ops = [tensors.opt_op, tensors.global_step]
-        if self.writer is not None:
-            ops.append(self.train_tensors.summary)
-        return sess.run(ops, feed_dict=feed_dict)
+        sess.run(tensors.opt_op, feed_dict=feed_dict)
+        if eval_tensors is not None:
+            return sess.run(eval_tensors, feed_dict)
+        else:
+            return None
+
 
     def train(self, sess, train_data_set, val_data_set, eval_period=1):
         assert isinstance(train_data_set, DataSet)
@@ -248,20 +253,31 @@ class Model(object):
         num_epochs = params.num_epochs
         batch_size = params.train_batch_size
         learning_rate = params.init_lr
+        linear = params.linear_start
+        prev_val_loss = None
+        if linear:
+            print "Starting with linear learning."
         for epoch_idx in xrange(num_epochs):
+            tensors = self.linear_train_tensors if linear else self.train_tensors
             while train_data_set.has_next(batch_size):
                 # global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
                 x, q, y = train_data_set.next_batch(batch_size)
-                result = self.train_batch(sess, x, q, y, learning_rate)
+                eval_tensors = [tensors.summary, self.variables.global_step]
+                result = self.train_batch(sess, tensors, x, q, y, learning_rate, eval_tensors=eval_tensors)
+                summary_str, global_step = result
                 if self.writer is not None:
-                    self.writer.add_summary(result[2], result[1])
-
+                    self.writer.add_summary(summary_str, global_step)
             train_data_set.rewind()
+
+            val_loss, acc = self.test(sess, val_data_set, 'val')
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
-                loss, acc = self.test(sess, val_data_set, 'val')
-                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, sum(loss), learning_rate)
+                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, val_loss, learning_rate)
             if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
                 learning_rate *= params.anneal_ratio
+            if linear and epoch_idx > 0 and val_loss > prev_val_loss:
+                print "Linear learning ended."
+                linear = False
+            prev_val_loss = val_loss
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
