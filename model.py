@@ -144,7 +144,8 @@ class Model(object):
 
             with tf.name_scope('const'):
                 l = self._get_l()  # [J, d]
-                l_aug = tf.expand_dims(tf.expand_dims(l, 0), 0, name='l_aug')  # [1, 1, J, d]
+                l_aug = tf.expand_dims(l, 0, name='l_aug')
+                l_aug_aug = tf.expand_dims(l_aug, 0, name='l_aug_aug')  # [1, 1, J, d]
 
             with tf.name_scope('a'):
                 a_batch = tf.nn.embedding_lookup(tf.diag(tf.ones(shape=[V])), y_batch, name='a')  # [N, d]
@@ -168,7 +169,7 @@ class Model(object):
                     with tf.name_scope('m'):
                         Ax_batch = tf.nn.embedding_lookup(As[layer_index], x_batch)  # [N, M, J, d]
                         if params.position_encoding:
-                            Ax_batch *= l_aug  # position encoding
+                            Ax_batch *= l_aug_aug  # position encoding
                         Ax_batch *= x_mask_aug_batch  # masking
                         m_batch = tf.reduce_sum(Ax_batch, 2)  # [N, M, d]
                         m_batch = tf.add(tf.expand_dims(TAs[layer_index], 0), m_batch, name='m')  # temporal encoding
@@ -176,7 +177,7 @@ class Model(object):
                     with tf.name_scope('c'):
                         Cx_batch = tf.nn.embedding_lookup(Cs[layer_index], x_batch)  # [N, M, J, d]
                         if params.position_encoding:
-                            Cx_batch *= l_aug  # position encoding
+                            Cx_batch *= l_aug_aug  # position encoding
                         Cx_batch *= x_mask_aug_batch
                         c_batch = tf.reduce_sum(Cx_batch, 2)
                         c_batch = tf.add(tf.expand_dims(TCs[layer_index], 0), c_batch, name='c')  # temporal encoding
