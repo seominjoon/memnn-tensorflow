@@ -26,30 +26,38 @@ class Model(object):
 
     def _init_variables(self):
         params = self.params
-        V, d = params.vocab_size, params.hidden_size
+        V, M, d = params.vocab_size, params.memory_size, params.hidden_size
 
         class Variables(object):
             pass
 
         variables = Variables()
         with tf.variable_scope("var", initializer=tf.random_normal_initializer(params.init_mean, params.init_std)):
-            As, Cs = [], []
+            As, TAs, Cs, TCs = [], [], [], []
             for layer_index in xrange(params.num_layers):
-                with tf.variable_scope("l%d" % layer_index):
+                with tf.variable_scope("layer_%d" % layer_index):
                     if layer_index == 0:
                         A = tf.get_variable('A', dtype='float', shape=[V, d])
+                        TA = tf.get_variable('TA', dtype='float', shape=[M, d])
                         C = tf.get_variable('C', dtype='float', shape=[V, d])
+                        TC = tf.get_variable('TC', dtype='float', shape=[M, d])
                     else:
                         if params.tying == 'adj':
-                            A = Cs[-1]
+                            A = tf.identity(Cs[-1], name='A')
+                            TA = tf.identity(TCs[-1], name='TA')
                             C = tf.get_variable('C', dtype='float', shape=[V, d])
+                            TC = tf.get_variable('TC', dtype='float', shape=[M, d])
                         elif params.tying == 'rnn':
-                            A = As[-1]
-                            C = Cs[-1]
+                            A = tf.identity(As[-1], name='A')
+                            TA = tf.identity(TAs[-1], name='TA')
+                            C = tf.identity(Cs[-1], name='C')
+                            TC = tf.identity(TCs[-1], name='TC')
                         else:
                             raise Exception('Unknown tying method: %s' % params.tying)
                     As.append(A)
+                    TAs.append(TA)
                     Cs.append(C)
+                    TCs.append(TC)
 
             if params.tying == 'adj':
                 B = tf.identity(As[0], name='B')
@@ -60,9 +68,30 @@ class Model(object):
             else:
                 raise Exception('Unknown tying method: %s' % params.tying)
 
-            variables.As, variables.B, variables.Cs, variables.W = As, B, Cs, W
+            if params.tying == 'rnn':
+                H = tf.get_variable('H', dtype='float', shape=[d, d])
+                variables.H = H
+
+            variables.As, variables.TAs, variables.B, variables.Cs, variables.TCs, variables.W = As, TAs, B, Cs, TCs, W
 
         return variables
+
+    def _get_l(self):
+        J, d = self.params.max_sentence_size, self.params.hidden_size
+        def f(JJ, jj, dd, kk):
+            return (1-float(jj)/JJ) - (float(kk)/dd)*(1-2.0*jj/JJ)
+        def g(jj):
+            return [f(J, jj, d, k) for k in range(d)]
+        l = [g(j) for j in range(J)]
+        l_tensor = tf.constant(l, shape=[J, d], name='l')
+        return l_tensor
+
+    def _softmax_with_mask(self, um_batch, m_mask_batch):
+        exp_um_batch = tf.exp(um_batch)  # [N, M]
+        masked_batch = exp_um_batch * m_mask_batch  # [N, M]
+        sum_2d_batch = tf.expand_dims(tf.reduce_sum(masked_batch, 1), -1)  # [N, 1]
+        p_batch = tf.div(masked_batch, sum_2d_batch, name='p')  # [N, M]
+        return p_batch
 
     def _build_graph(self, mode):
         params = self.params
@@ -77,9 +106,9 @@ class Model(object):
         else:
             raise Exception("Invalid graph mode: %s" % mode)
 
-        learning_rate = params.init_lr
-
-        As, B, Cs, W = variables.As, variables.B, variables.Cs, variables.W
+        As, TAs, B, Cs, TCs, W = variables.As, variables.TAs, variables.B, variables.Cs, variables.TCs, variables.W
+        if params.tying == 'rnn':
+            H = variables.H
 
         class Tensors(object):
             pass
@@ -94,6 +123,7 @@ class Model(object):
                 with tf.name_scope('x'):
                     x_batch = tf.placeholder('int32', shape=[N, M, J], name='x')
                     x_mask_batch = tf.placeholder('float', shape=[N, M, J], name='x_mask')
+                    x_mask_aug_batch = tf.expand_dims(x_mask_batch, -1, 'x_mask_aug')
                     m_mask_batch = tf.placeholder('float', shape=[N, M], name='m_mask')
                     tensors.x = x_batch
                     tensors.x_mask = x_mask_batch
@@ -110,6 +140,10 @@ class Model(object):
 
                 learning_rate = tf.placeholder('float', name='lr')
                 tensors.learning_rate = learning_rate
+
+            with tf.name_scope('const'):
+                l = self._get_l()  # [J, d]
+                l_aug = tf.expand_dims(tf.expand_dims(l, 0), 0, name='l_aug')  # [1, 1, J, d]
 
             with tf.name_scope('a'):
                 a_batch = tf.nn.embedding_lookup(tf.diag(tf.ones(shape=[V])), y_batch, name='a')  # [N, d]
@@ -129,17 +163,24 @@ class Model(object):
 
                     with tf.name_scope('m'):
                         Ax_batch = tf.nn.embedding_lookup(As[layer_index], x_batch)  # [N, M, J, d]
-                        m_batch = tf.reduce_sum(tf.expand_dims(x_mask_batch, -1) * Ax_batch, 2, name='m')  # [N, M, d]
+                        Ax_batch *= x_mask_aug_batch  # masking
+                        if params.position_encoding:
+                            Ax_batch *= l_aug  # position encoding
+                        m_batch = tf.reduce_sum(Ax_batch, 2)  # [N, M, d]
+                        m_batch = tf.mul(tf.expand_dims(TAs[layer_index], 0), m_batch, name='m')  # temporal encoding
 
                     with tf.name_scope('c'):
-                        Cx_batch = tf.nn.embedding_lookup(Cs[layer_index], x_batch)
-                        c_batch = tf.reduce_sum(tf.expand_dims(x_mask_batch, -1) * Cx_batch, 2, name='c')
+                        Cx_batch = tf.nn.embedding_lookup(Cs[layer_index], x_batch)  # [N, M, J, d]
+                        Cx_batch *= x_mask_aug_batch
+                        if params.position_encoding:
+                            Cx_batch *= l_aug  # position encoding
+                        c_batch = tf.reduce_sum(Cx_batch, 2)
+                        c_batch = tf.mul(tf.expand_dims(TCs[layer_index], 0), c_batch, name='c')  # temporal encoding
 
                     with tf.name_scope('p'):
-                        u_batch_x = tf.expand_dims(u_batch, -1)  # [N, d, 1]
-                        p_batch = tf.nn.softmax(tf.squeeze(
-                                    tf.batch_matmul(tf.expand_dims(m_mask_batch, -1) * m_batch, u_batch_x),
-                                    [2]), name='p')  # [N, M]
+                        u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
+                        um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])
+                        p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
 
                     with tf.name_scope('o'):
                         o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
@@ -147,15 +188,18 @@ class Model(object):
                 u_batch_list.append(u_batch)
                 o_batch_list.append(o_batch)
 
-            last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
+            if params.tying == 'rnn':
+                last_u_batch = tf.add(tf.matmul(u_batch_list[-1], H), o_batch_list[-1], name='last_u')
+            else:
+                last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
 
             with tf.name_scope('ap'):
                 ap_batch = tf.nn.softmax(tf.matmul(last_u_batch, W), name='ap')  # [N d] X [d V] = [N V]
 
             with tf.name_scope('loss'):
-                loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(ap_batch, a_batch, name='loss'), 0)
+                loss = tf.nn.softmax_cross_entropy_with_logits(ap_batch, a_batch, name='loss')
                 tensors.loss = loss
-                summaries.append(tf.scalar_summary('loss', loss))
+                summaries.append(tf.scalar_summary('loss', tf.reduce_sum(loss, 0)))
 
             with tf.name_scope('acc'):
                 correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
@@ -165,7 +209,9 @@ class Model(object):
             if mode == 'train':
                 global_step = tf.Variable(0, trainable=False, name='global_step')
                 opt = tf.train.GradientDescentOptimizer(learning_rate)
-                opt_op = opt.minimize(loss, global_step=global_step)
+                grads_and_vars = opt.compute_gradients(loss)
+                clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
+                opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=global_step)
                 tensors.opt_op = opt_op
                 tensors.global_step = global_step
 
@@ -207,7 +253,7 @@ class Model(object):
             train_data_set.rewind()
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
                 loss, acc = self.test(sess, val_data_set, 'val')
-                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, loss, learning_rate)
+                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, sum(loss), learning_rate)
             if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
                 learning_rate *= params.anneal_ratio
 
