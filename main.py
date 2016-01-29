@@ -21,6 +21,8 @@ flags.DEFINE_integer("num_epochs", 100, "Total number of epochs for training [10
 flags.DEFINE_boolean("te", True, "Temporal encoding enabled? 'True' or 'False' [True]")
 flags.DEFINE_boolean("pe", True, "Position encoding enabled? 'True' or 'False' [True]")
 flags.DEFINE_string("tying", 'adj', "Indicate tying method: 'adj' or 'rnn' [adj]")
+flags.DEFINE_boolean("gpu", False, 'Enable GPU (Linux only) [False]')
+flags.DEFINE_string("log_dir", "logs", "Log directory [logs]")
 
 flags.DEFINE_string("data_dir", 'data/tasks_1-20_v1-2/en/', "Data folder directory [data/tasks_1-20_v1-2/en]")
 flags.DEFINE_string("data_prefix", "qa1_", "Prefix for file names to fetch in data_dir [qa1_]")
@@ -39,7 +41,7 @@ def main(_):
     print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.max_sentence_size)
 
     graph = tf.Graph()
-    model = Model(graph, FLAGS, logdir="logs/")
+    model = Model(graph, FLAGS, log_dir=FLAGS.log_dir, gpu=FLAGS.gpu)
     with tf.Session(graph=graph) as sess:
         sess.run(tf.initialize_all_variables())
         model.train(sess, train_ds, test_ds)
