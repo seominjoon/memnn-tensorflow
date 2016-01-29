@@ -7,7 +7,7 @@ import numpy as np
 class DataSet(object):
     def __init__(self, xs, qs, ys, max_sentence_size=None, vocab_size=None, vocab_map=None):
         assert len(xs) == len(ys), "X and Y sizes don't match."
-        self._num_examples = len(xs)
+        self.num_examples = len(xs)
         self.xs = xs
         self.qs = qs
         self.ys = ys
@@ -18,7 +18,7 @@ class DataSet(object):
         self._index_in_epoch = 0
 
     def next_batch(self, batch_size):
-        assert batch_size <= self._num_examples, "batch size cannot be greater than data size."
+        assert batch_size <= self.num_examples, "batch size cannot be greater than data size."
         assert self.has_next(batch_size), "there is not batch left!"
         i, b = self._index_in_epoch, batch_size
         batch = self.xs[i:i + b], self.qs[i:i + b], self.ys[i:i + b]
@@ -26,7 +26,7 @@ class DataSet(object):
         return batch
 
     def has_next(self, batch_size):
-        return self._index_in_epoch + batch_size <= self._num_examples
+        return self._index_in_epoch + batch_size <= self.num_examples
 
     def rewind(self):
         self._index_in_epoch = 0
@@ -35,6 +35,7 @@ class DataSet(object):
         np.random.shuffle(xqys)
         self.xs, self.qs, self.ys = zip(*xqys)
 
+# TODO : split data into val
 
 def _tokenize(raw):
     return re.findall(r"[\w']+|[.,!?;]", raw)
