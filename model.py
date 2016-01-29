@@ -194,10 +194,11 @@ class Model(object):
                 last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
 
             with tf.name_scope('ap'):
-                ap_batch = tf.nn.softmax(tf.matmul(last_u_batch, W), name='ap')  # [N d] X [d V] = [N V]
+                ap_raw_batch = tf.matmul(last_u_batch, W, name='ap_raw')
+                ap_batch = tf.nn.softmax(ap_raw_batch, name='ap')  # [N d] X [d V] = [N V]
 
             with tf.name_scope('loss'):
-                loss = tf.nn.softmax_cross_entropy_with_logits(ap_batch, a_batch, name='loss')
+                loss = tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch, name='loss')
                 tensors.loss = loss
                 summaries.append(tf.scalar_summary('loss', tf.reduce_sum(loss, 0)))
 
