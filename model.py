@@ -209,9 +209,11 @@ class Model(object):
                 ap_batch = tf.nn.softmax(ap_raw_batch, name='ap')
 
             with tf.name_scope('loss'):
-                loss = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch), 0, name='loss')
-                tensors.loss = loss
-                summaries.append(tf.scalar_summary('loss', loss))
+                losses = tf.nn.softmax_cross_entropy_with_logits(ap_raw_batch, a_batch)
+                avg_loss = tf.reduce_mean(losses, 0)
+                summaries.append(tf.scalar_summary('avg_loss', avg_loss))
+                tensors.losses = losses
+                tensors.avg_loss = avg_loss
 
             with tf.name_scope('acc'):
                 correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
@@ -220,7 +222,7 @@ class Model(object):
 
             if mode == 'train':
                 opt = tf.train.GradientDescentOptimizer(learning_rate)
-                grads_and_vars = opt.compute_gradients(loss)
+                grads_and_vars = opt.compute_gradients(losses)
                 clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
                 opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=self.variables.global_step)
                 tensors.opt_op = opt_op
@@ -254,7 +256,7 @@ class Model(object):
         batch_size = params.train_batch_size
         learning_rate = params.init_lr
         linear = params.linear_start
-        prev_val_loss = None
+        prev_val_avg_loss = None
         if linear:
             print "Starting with linear learning."
         for epoch_idx in xrange(num_epochs):
@@ -269,15 +271,15 @@ class Model(object):
                     self.writer.add_summary(summary_str, global_step)
             train_data_set.rewind()
 
-            val_loss, acc = self.test(sess, val_data_set, 'val')
+            val_avg_loss, acc = self.test(sess, val_data_set, 'val')
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
-                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, val_loss, learning_rate)
+                print "iter %d: val_acc=%.2f%%, val_avg_loss=%.3f, lr=%f" % (epoch_idx, acc*100, val_avg_loss, learning_rate)
             if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
                 learning_rate *= params.anneal_ratio
-            if linear and epoch_idx > 0 and val_loss > prev_val_loss:
+            if linear and epoch_idx > 0 and val_avg_loss > prev_val_avg_loss:
                 print "Linear learning ended."
                 linear = False
-            prev_val_loss = val_loss
+            prev_val_avg_loss = val_avg_loss
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
@@ -290,7 +292,7 @@ class Model(object):
             raise Exception()
 
         feed_dict = self._get_feed_dict(tensors, x, q, y)
-        loss, acc = sess.run([tensors.loss, tensors.acc], feed_dict=feed_dict)
+        loss, acc = sess.run([tensors.avg_loss, tensors.acc], feed_dict=feed_dict)
         return loss, acc
 
     def _preprocess(self, x_raw_batch, q_raw_batch):

@@ -117,7 +117,12 @@ def read_babi(dir_path, prefix="", suffix=""):
 
 
 def split_val(data_set, ratio):
-    pass
+    end_idx = int(data_set.num_examples * (1-ratio))
+    left = DataSet(data_set.xs[:end_idx], data_set.qs[:end_idx], data_set.ys[:end_idx],
+                   max_sentence_size=data_set.max_sentence_size, vocab_size=data_set.vocab_size, vocab_map=data_set.vocab_map)
+    right = DataSet(data_set.xs[end_idx:], data_set.qs[end_idx:], data_set.ys[end_idx:],
+                    max_sentence_size=data_set.max_sentence_size, vocab_size=data_set.vocab_size, vocab_map=data_set.vocab_map)
+    return left, right
 
 
 if __name__ == "__main__":
