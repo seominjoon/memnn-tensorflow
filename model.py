@@ -5,19 +5,24 @@ from data import DataSet
 
 
 class Model(object):
-    def __init__(self, graph, params, logdir=None):
+    def __init__(self, graph, params, logdir=None, gpu_enabled=False):
         self.graph = graph
+        self.params = params
         with graph.as_default():
-            self.params = params
-            self.variables = self._init_variables()
-            self.train_tensors = self._build_graph('train')
-            self.val_tensors = self._build_graph('val')
-            self.test_tensors = self._build_graph('test')
-
-            if logdir is not None:
-                self.writer = tf.train.SummaryWriter(logdir, graph.as_graph_def())
-            else:
-                self.writer = None
+            def device_for_node(n):
+                if gpu_enabled and n.type == "MatMul":
+                    return "/gpu:0"
+                else:
+                    return "/cpu:0"
+            with graph.device(device_for_node):
+                self.variables = self._init_variables()
+                self.train_tensors = self._build_graph('train')
+                self.val_tensors = self._build_graph('val')
+                self.test_tensors = self._build_graph('test')
+                if logdir is not None:
+                    self.writer = tf.train.SummaryWriter(logdir, graph.as_graph_def())
+                else:
+                    self.writer = None
 
     def _init_variables(self):
         params = self.params
@@ -86,19 +91,25 @@ class Model(object):
         with tf.variable_scope(mode):
             # placeholders
             with tf.name_scope('ph'):
-                x_batch = tf.placeholder('int32', shape=[N, M, J], name='x')
-                x_mask_batch = tf.placeholder('float', shape=[N, M, J], name='x_mask')
-                q_batch = tf.placeholder('int32', shape=[N, J], name='q')
-                q_mask_batch = tf.placeholder('float', shape=[N, J], name='q_mask')
-                y_batch = tf.placeholder('int32', shape=[N], name='y')
-                m_mask_batch = tf.placeholder('float', shape=[N, M], name='m_mask')
+                with tf.name_scope('x'):
+                    x_batch = tf.placeholder('int32', shape=[N, M, J], name='x')
+                    x_mask_batch = tf.placeholder('float', shape=[N, M, J], name='x_mask')
+                    m_mask_batch = tf.placeholder('float', shape=[N, M], name='m_mask')
+                    tensors.x = x_batch
+                    tensors.x_mask = x_mask_batch
+                    tensors.m_mask = m_mask_batch
 
-                tensors.x = x_batch
-                tensors.x_mask = x_mask_batch
-                tensors.q = q_batch
-                tensors.q_mask = q_mask_batch
+                with tf.name_scope('q'):
+                    q_batch = tf.placeholder('int32', shape=[N, J], name='q')
+                    q_mask_batch = tf.placeholder('float', shape=[N, J], name='q_mask')
+                    tensors.q = q_batch
+                    tensors.q_mask = q_mask_batch
+
+                y_batch = tf.placeholder('int32', shape=[N], name='y')
                 tensors.y = y_batch
-                tensors.m_mask = m_mask_batch
+
+                learning_rate = tf.placeholder('float', name='lr')
+                tensors.learning_rate = learning_rate
 
             with tf.name_scope('a'):
                 a_batch = tf.nn.embedding_lookup(tf.diag(tf.ones(shape=[V])), y_batch, name='a')  # [N, d]
@@ -150,10 +161,13 @@ class Model(object):
                 correct = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
                 acc = tf.reduce_mean(tf.cast(correct, 'float'), name='acc')
                 tensors.acc = acc
+
             if mode == 'train':
+                global_step = tf.Variable(0, trainable=False, name='global_step')
                 opt = tf.train.GradientDescentOptimizer(learning_rate)
-                opt_op = opt.minimize(loss)
+                opt_op = opt.minimize(loss, global_step=global_step)
                 tensors.opt_op = opt_op
+                tensors.global_step = global_step
 
         tensors.summary = tf.merge_summary(summaries)
 
@@ -165,11 +179,12 @@ class Model(object):
                      tensors.q: q, tensors.q_mask: q_mask, tensors.y: y}
         return feed_dict
 
-    def train_batch(self, sess, x, q, y):
+    def train_batch(self, sess, x, q, y, learning_rate):
         # Need to initialize all variables in sess before training!
         tensors = self.train_tensors
         feed_dict = self._get_feed_dict(tensors, x, q, y)
-        ops = [tensors.opt_op]
+        feed_dict[tensors.learning_rate] = learning_rate
+        ops = [tensors.opt_op, tensors.global_step]
         if self.writer is not None:
             ops.append(self.train_tensors.summary)
         return sess.run(ops, feed_dict=feed_dict)
@@ -180,18 +195,21 @@ class Model(object):
         params = self.params
         num_epochs = params.num_epochs
         batch_size = params.train_batch_size
+        learning_rate = params.init_lr
         for epoch_idx in xrange(num_epochs):
             while train_data_set.has_next(batch_size):
-                global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
+                # global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
                 x, q, y = train_data_set.next_batch(batch_size)
-                result = self.train_batch(sess, x, q, y)
+                result = self.train_batch(sess, x, q, y, learning_rate)
                 if self.writer is not None:
-                    self.writer.add_summary(result[1], global_idx)
+                    self.writer.add_summary(result[2], result[1])
 
             train_data_set.rewind()
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
                 loss, acc = self.test(sess, val_data_set, 'val')
-                print "iter %d: acc=%.2f%%, loss=%.0f" % (epoch_idx, acc*100, loss)
+                print "iter %d: acc=%.2f%%, loss=%.0f, lr=%f" % (epoch_idx, acc*100, loss, learning_rate)
+            if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
+                learning_rate *= params.anneal_ratio
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
