@@ -5,12 +5,12 @@ from data import DataSet
 
 
 class Model(object):
-    def __init__(self, graph, params, logdir=None, gpu_enabled=False):
+    def __init__(self, graph, params, log_dir=None, gpu=False):
         self.graph = graph
         self.params = params
         with graph.as_default():
             def device_for_node(n):
-                if gpu_enabled and n.type == "MatMul":
+                if gpu and n.type == "MatMul":
                     return "/gpu:0"
                 else:
                     return "/cpu:0"
@@ -19,8 +19,8 @@ class Model(object):
                 self.train_tensors = self._build_graph('train')
                 self.val_tensors = self._build_graph('val')
                 self.test_tensors = self._build_graph('test')
-                if logdir is not None:
-                    self.writer = tf.train.SummaryWriter(logdir, graph.as_graph_def())
+                if log_dir is not None:
+                    self.writer = tf.train.SummaryWriter(log_dir, graph.as_graph_def())
                 else:
                     self.writer = None
 
