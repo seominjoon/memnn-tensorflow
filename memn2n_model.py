@@ -135,6 +135,7 @@ class MemN2NModel(object):
         # question embedding
         if config.tying == 'adj':
             self.B_em = EmbeddingModule(config, self.A_ems[0])
+            self.B_em = EmbeddingModule(config, name='B')
         else:
             self.B_em = EmbeddingModule(config, name='B')
 
@@ -152,6 +153,7 @@ class MemN2NModel(object):
         # output mapping
         if config.tying == 'adj':
             self.W = tf.transpose(self.C_ems[-1].A)
+            self.W = tf.get_variable('W', shape=[config.hidden_size, config.vocab_size], initializer=default_initializer)
         elif config.tying == 'rnn':
             self.W = tf.get_variable('W', shape=[config.hidden_size, config.vocab_size], initializer=default_initializer)
 
