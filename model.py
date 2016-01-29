@@ -8,22 +8,18 @@ class Model(object):
     def __init__(self, graph, params, log_dir=None, gpu=False):
         self.graph = graph
         self.params = params
+        self.gpu = gpu
         with graph.as_default():
-            def device_for_node(n):
-                if gpu and n.type == "MatMul":
-                    return "/gpu:0"
-                else:
-                    return "/cpu:0"
-            with graph.device(device_for_node):
+            with tf.device('/cpu:0'):
                 self.variables = self._init_variables()
-                self.train_tensors = self._build_graph('train')
-                self.linear_train_tensors = self._build_graph('train', linear=True)
-                self.val_tensors = self._build_graph('val')
-                self.test_tensors = self._build_graph('test')
-                if log_dir is not None:
-                    self.writer = tf.train.SummaryWriter(log_dir, graph.as_graph_def())
-                else:
-                    self.writer = None
+            self.train_tensors = self._build_graph('train')
+            self.linear_train_tensors = self._build_graph('train', linear=True)
+            self.val_tensors = self._build_graph('val')
+            self.test_tensors = self._build_graph('test')
+            if log_dir is not None:
+                self.writer = tf.train.SummaryWriter(log_dir, graph.as_graph_def())
+            else:
+                self.writer = None
 
     def _init_variables(self):
         params = self.params
