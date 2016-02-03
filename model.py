@@ -270,12 +270,12 @@ class Model(object):
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
                 print "iter %d: train_err=%.2f%%, val_err=%.2f%%, val_avg_loss=%.3f, lr=%f" % \
                       (epoch_idx, (1-train_acc)*100, (1-acc)*100, val_avg_loss, learning_rate)
-            if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
-                learning_rate *= params.anneal_ratio
-            if linear and epoch_idx >= 20:
+            if linear and epoch_idx == 20:
                 print "Linear learning ended."
                 linear = False
                 learning_rate = params.init_lr
+            if epoch_idx > 20 and (epoch_idx-20) % params.anneal_period == 0:
+                learning_rate *= params.anneal_ratio
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
