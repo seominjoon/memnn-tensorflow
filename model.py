@@ -256,12 +256,8 @@ class Model(object):
         linear = params.linear_start
         ls_duration = params.ls_duration if linear else 0
 
-        if linear:
-            print "Staring linear learning."
-
         for epoch_idx in xrange(num_epochs + ls_duration):
             if linear and epoch_idx == params.ls_duration:
-                print "Linear learning ended."
                 linear = False
                 learning_rate = params.init_lr
             if epoch_idx > params.ls_duration and (epoch_idx-params.ls_duration) % params.anneal_period == 0:
@@ -286,8 +282,11 @@ class Model(object):
             if epoch_idx > 0 and (epoch_idx + 1) % eval_period == 0:
                 if params.progress:
                     pbar.finish()
-                print "iter %d: train_err=%.2f%%, val_err=%.2f%%, val_avg_loss=%.3f, lr=%f" % \
+                out = "iter %d: train_err=%.2f%%, val_err=%.2f%%, val_avg_loss=%.3f, lr=%f" % \
                       (epoch_idx+1, (1-train_acc)*100, (1-acc)*100, val_avg_loss, learning_rate)
+                if linear:
+                    out += " (linear learning)"
+                print out
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
