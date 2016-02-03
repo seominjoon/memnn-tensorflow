@@ -38,7 +38,9 @@ class DataSet(object):
 # TODO : split data into val
 
 def _tokenize(raw):
-    return re.findall(r"[\w']+|[.,!?;]", raw)
+    tokens = re.findall(r"[\w]+", raw)
+    normalized_tokens = [token.lower() for token in tokens]
+    return normalized_tokens
 
 
 _s_re = re.compile("^(\\d+) ([\\w\\s.]+)")
