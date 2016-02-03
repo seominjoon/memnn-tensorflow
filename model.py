@@ -250,7 +250,7 @@ class Model(object):
         params = self.params
         num_epochs = params.num_epochs
         batch_size = params.train_batch_size
-        learning_rate = params.init_lr
+        learning_rate = params.ls_init_lr
         linear = params.linear_start
         if linear:
             print "Starting with linear learning."
@@ -275,6 +275,7 @@ class Model(object):
             if linear and epoch_idx >= 20:
                 print "Linear learning ended."
                 linear = False
+                learning_rate = params.init_lr
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
