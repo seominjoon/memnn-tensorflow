@@ -190,10 +190,7 @@ class Model(object):
                             p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
 
                     with tf.name_scope('o'):
-                        if linear:
-                            o_batch
-                        else:
-                            o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
+                        o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
 
 
                 u_batch_list.append(u_batch)
