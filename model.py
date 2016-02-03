@@ -1,7 +1,9 @@
 import tensorflow as tf
 import numpy as np
+import progressbar as pb
 
 from data import DataSet
+
 
 
 class Model(object):
@@ -244,7 +246,7 @@ class Model(object):
         else:
             return None
 
-    def train(self, sess, train_data_set, val_data_set, eval_period=1):
+    def train(self, sess, train_data_set, val_data_set, eval_period=25):
         assert isinstance(train_data_set, DataSet)
         assert isinstance(val_data_set, DataSet)
         params = self.params
@@ -252,12 +254,23 @@ class Model(object):
         batch_size = params.train_batch_size
         learning_rate = params.ls_init_lr
         linear = params.linear_start
+        ls_duration = params.ls_duration if linear else 0
+
         if linear:
-            print "Starting with linear learning."
-        for epoch_idx in xrange(num_epochs):
+            print "Staring linear learning."
+
+        for epoch_idx in xrange(num_epochs + ls_duration):
+            if linear and epoch_idx == params.ls_duration:
+                print "Linear learning ended."
+                linear = False
+                learning_rate = params.init_lr
+            if epoch_idx > params.ls_duration and (epoch_idx-params.ls_duration) % params.anneal_period == 0:
+                learning_rate *= params.anneal_ratio
+
+            if params.progress and epoch_idx % eval_period == 0:
+                pbar = pb.ProgressBar(widgets=[pb.Percentage(), pb.Bar(), pb.Timer()], maxval=eval_period).start()
             tensors = self.linear_train_tensors if linear else self.train_tensors
             while train_data_set.has_next(batch_size):
-                # global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
                 x, q, y = train_data_set.next_batch(batch_size)
                 eval_tensors = [tensors.summary, self.variables.global_step, tensors.acc]
                 result = self.train_batch(sess, tensors, x, q, y, learning_rate, eval_tensors=eval_tensors)
@@ -266,16 +279,15 @@ class Model(object):
                     self.writer.add_summary(summary_str, global_step)
             train_data_set.rewind()
 
+            if params.progress:
+                pbar.update(epoch_idx % eval_period + 1)
+
             val_avg_loss, acc = self.test(sess, val_data_set, 'val')
-            if epoch_idx > 0 and epoch_idx % eval_period == 0:
+            if epoch_idx > 0 and (epoch_idx + 1) % eval_period == 0:
+                if params.progress:
+                    pbar.finish()
                 print "iter %d: train_err=%.2f%%, val_err=%.2f%%, val_avg_loss=%.3f, lr=%f" % \
-                      (epoch_idx, (1-train_acc)*100, (1-acc)*100, val_avg_loss, learning_rate)
-            if linear and epoch_idx == 20:
-                print "Linear learning ended."
-                linear = False
-                learning_rate = params.init_lr
-            if epoch_idx > 20 and (epoch_idx-20) % params.anneal_period == 0:
-                learning_rate *= params.anneal_ratio
+                      (epoch_idx+1, (1-train_acc)*100, (1-acc)*100, val_avg_loss, learning_rate)
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys
