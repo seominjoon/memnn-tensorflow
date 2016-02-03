@@ -185,7 +185,7 @@ class Model(object):
                         u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
                         um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])  # [N, M]
                         if linear:
-                            p_batch = tf.identity(um_batch, name='p')
+                            p_batch = tf.div(um_batch, tf.expand_dims(tf.reduce_sum(um_batch, 1), -1), name='p')
                         else:
                             p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
 
@@ -242,7 +242,6 @@ class Model(object):
             return sess.run(eval_tensors, feed_dict)
         else:
             return None
-
 
     def train(self, sess, train_data_set, val_data_set, eval_period=1):
         assert isinstance(train_data_set, DataSet)
