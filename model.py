@@ -260,22 +260,22 @@ class Model(object):
             while train_data_set.has_next(batch_size):
                 # global_idx = epoch_idx * (train_data_set.num_examples / batch_size) + train_data_set._index_in_epoch
                 x, q, y = train_data_set.next_batch(batch_size)
-                eval_tensors = [tensors.summary, self.variables.global_step]
+                eval_tensors = [tensors.summary, self.variables.global_step, tensors.acc]
                 result = self.train_batch(sess, tensors, x, q, y, learning_rate, eval_tensors=eval_tensors)
-                summary_str, global_step = result
+                summary_str, global_step, train_acc = result
                 if self.writer is not None:
                     self.writer.add_summary(summary_str, global_step)
             train_data_set.rewind()
 
             val_avg_loss, acc = self.test(sess, val_data_set, 'val')
             if epoch_idx > 0 and epoch_idx % eval_period == 0:
-                print "iter %d: val_acc=%.2f%%, val_avg_loss=%.3f, lr=%f" % (epoch_idx, acc*100, val_avg_loss, learning_rate)
+                print "iter %d: train_err=%.2f%%, val_err=%.2f%%, val_avg_loss=%.3f, lr=%f" % \
+                      (epoch_idx, (1-train_acc)*100, (1-acc)*100, val_avg_loss, learning_rate)
             if epoch_idx > 0 and epoch_idx % params.anneal_period == 0:
                 learning_rate *= params.anneal_ratio
-            if linear and epoch_idx > 0 and val_avg_loss > prev_val_avg_loss:
+            if linear and epoch_idx >= 20:
                 print "Linear learning ended."
                 linear = False
-            prev_val_avg_loss = val_avg_loss
 
     def test(self, sess, test_data_set, mode):
         x, q, y = test_data_set.xs, test_data_set.qs, test_data_set.ys

@@ -44,7 +44,7 @@ def main(_):
     print "vocab size: %d, max sentence length: %d" % (FLAGS.vocab_size, FLAGS.max_sentence_size)
     print "training: %d, validation: %d, test: %d" % (train_ds.num_examples, val_ds.num_examples, test_ds.num_examples)
     print "num epochs: %d, num layers: %d" % (FLAGS.num_epochs, FLAGS.num_layers)
-    pprint(train_ds.vocab_map)
+    # pprint(train_ds.vocab_map)
 
     graph = tf.Graph()
     model = Model(graph, FLAGS, log_dir=FLAGS.log_dir, gpu=FLAGS.gpu)
