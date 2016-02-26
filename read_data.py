@@ -110,7 +110,9 @@ def read_babi_split(batch_size, *file_paths_list):
     data_sets = [DataSet(batch_size, range(len(xs)), xs, qs, ys)
                  for xs, qs, ys in zip(xs_list, qs_list, ys_list)]
     # just for debugging
-    for data_set in data_sets: data_set.vocab_map = vocab_map
+    for data_set in data_sets:
+        data_set.vocab_map = vocab_map
+        data_set.vocab_size = len(vocab_map)
     return data_sets
 
 
