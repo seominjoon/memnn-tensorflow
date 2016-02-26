@@ -35,6 +35,7 @@ flags.DEFINE_string("tying", 'adj', "Indicate tying method: 'adj' or 'rnn' [adj]
 # Training and testing options
 flags.DEFINE_integer("task", 1, "Task number [1]")
 flags.DEFINE_boolean("train", False, "Train? Test if False [False]")
+flags.DEFINE_boolean("load", False, "Load from saved model? [False]")
 flags.DEFINE_boolean("progress", True, "Show progress? [True]")
 flags.DEFINE_boolean("gpu", False, 'Enable GPU? (Linux only) [False]')
 flags.DEFINE_float("val_ratio", 0.1, "Validation data ratio to training data [0.1]")
@@ -82,8 +83,11 @@ def main(_):
         sess.run(tf.initialize_all_variables())
         if FLAGS.train:
             writer = tf.train.SummaryWriter(FLAGS.log_dir, sess.graph_def)
+            if FLAGS.load:
+                model.load(sess)
             model.train(sess, writer, train_ds, val_ds, num_batches=FLAGS.train_num_batches)
         else:
+            model.load(sess)
             model.test(sess, test_ds, num_batches=FLAGS.test_num_batches)
 
 if __name__ == "__main__":
