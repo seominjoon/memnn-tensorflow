@@ -10,7 +10,7 @@ class DataSet(object):
         assert batch_size <= len(xs), "batch size cannot be greater than data size."
         self.name = name or "dataset"
         self.idxs = idxs
-        self.num_examples = len(xs)
+        self.num_examples = len(idxs)
         self.xs = xs
         self.qs = qs
         self.ys = ys

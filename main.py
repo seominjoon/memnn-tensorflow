@@ -76,6 +76,7 @@ def main(_):
         FLAGS.save_period = 1
 
     pprint(FLAGS.__flags)
+    print "training: %d, validation: %d, test: %d" % (train_ds.num_examples, val_ds.num_examples, test_ds.num_examples)
 
     graph = tf.Graph()
     model = N2NModel(graph, FLAGS)

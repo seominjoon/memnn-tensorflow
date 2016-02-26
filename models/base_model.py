@@ -78,8 +78,8 @@ class BaseModel(object):
         num_corrects, total = 0, 0
         string = "%s:N=%d|" % (test_data_set.name, test_data_set.batch_size * num_batches)
         pbar = pb.ProgressBar(widgets=[string, pb.Percentage(), pb.Bar(), pb.ETA()], maxval=num_batches)
-        pbar.start()
         losses = []
+        pbar.start()
         for num_batches_completed in xrange(num_batches):
             batch = test_data_set.get_next_labeled_batch()
             cur_num_corrects, cur_loss, _, global_step = self.test_batch(sess, batch)

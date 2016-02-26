@@ -170,7 +170,6 @@ class N2NModel(BaseModel):
                 with tf.name_scope('o'):
                     o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
 
-
             u_batch_list.append(u_batch)
             o_batch_list.append(o_batch)
 
@@ -201,7 +200,7 @@ class N2NModel(BaseModel):
 
         with tf.name_scope('opt'):
             opt = tf.train.GradientDescentOptimizer(learning_rate)
-            grads_and_vars = opt.compute_gradients(total_loss)
+            grads_and_vars = opt.compute_gradients(cross_entropy)
             clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
             opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=self.global_step)
             self.opt_op = opt_op
