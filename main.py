@@ -4,7 +4,6 @@ import os
 import tensorflow as tf
 
 import read_data
-from models.base_model import BaseModel
 from models.n2n_model import N2NModel
 
 flags = tf.app.flags
@@ -21,7 +20,7 @@ flags.DEFINE_integer("hidden_size", 20, "Embedding dimension [20]")
 flags.DEFINE_integer("num_layers", 3, "Number of memory layers (hops) [3]")
 flags.DEFINE_float("init_mean", 0, "Initial weight mean [0]")
 flags.DEFINE_float("init_std", 0.1, "Initial weight std [0.1]")
-flags.DEFINE_boolean("linear_start", True, "Start training with linear model? [True]")
+flags.DEFINE_boolean("linear_start", False, "Start training with linear model? [False]")
 flags.DEFINE_float("init_lr", 0.01, "Initial learning rate [0.01]")
 flags.DEFINE_float("ls_init_lr", 0.005, "Initial learning rate for linear start [0.005]")
 flags.DEFINE_integer("num_epochs", 100, "Total number of epochs for training [100]")
@@ -39,8 +38,8 @@ flags.DEFINE_boolean("load", False, "Load from saved model? [False]")
 flags.DEFINE_boolean("progress", True, "Show progress? [True]")
 flags.DEFINE_boolean("gpu", False, 'Enable GPU? (Linux only) [False]')
 flags.DEFINE_float("val_ratio", 0.1, "Validation data ratio to training data [0.1]")
-flags.DEFINE_integer("eval_period", 20, "Val data eval period (for display purpose only) [20]")
-flags.DEFINE_integer("save_period", 1, "Save period [1]")
+flags.DEFINE_integer("eval_period", 5, "Val data eval period (for display purpose only) [5]")
+flags.DEFINE_integer("save_period", 10, "Save period [10]")
 
 # Debugging
 flags.DEFINE_boolean("draft", False, "Draft? (quick build) [False]")
