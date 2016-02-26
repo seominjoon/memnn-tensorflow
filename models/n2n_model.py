@@ -4,6 +4,82 @@ import numpy as np
 from models.base_model import BaseModel
 
 
+class Container(object):
+    pass
+
+class MemoryLayer(object):
+    def __init__(self, params, prev_layer, phs, consts, tensors):
+        self.params = params
+        N, M, J, V, d = params.batch_size, params.memory_size, params.max_sent_size, params.vocab_size, params.hidden_size
+        linear_start = params.linear_start
+
+        x_batch, x_mask_aug_batch, m_mask_batch = phs.x_batch, phs.x_mask_aug_batch, phs.m_mask_batch
+        l_aug_aug = consts.l_aug_aug
+
+        B, first_u_batch = tensors.B, tensors.first_u_batch
+
+        if not prev_layer:
+            A = tf.identity(B, name='A') if params.tying == 'adj' else tf.get_variable('A', dtype='float', shape=[V, d])
+            TA = tf.get_variable('TA', dtype='float', shape=[M, d])
+            C = tf.get_variable('C', dtype='float', shape=[V, d])
+            TC = tf.get_variable('TC', dtype='float', shape=[M, d])
+        else:
+            if params.tying == 'adj':
+                A = tf.identity(prev_layer.C, name='A')
+                TA = tf.identity(prev_layer.TC, name='TA')
+                C = tf.get_variable('C', dtype='float', shape=[V, d])
+                TC = tf.get_variable('TC', dtype='float', shape=[M, d])
+            elif params.tying == 'rnn':
+                A = tf.identity(prev_layer.A, name='A')
+                TA = tf.identity(prev_layer.TA, name='TA')
+                C = tf.identity(prev_layer.C, name='C')
+                TC = tf.identity(prev_layer.TC, name='TC')
+            else:
+                raise Exception('Unknown tying method: %s' % params.tying)
+
+        if not prev_layer:
+            u_batch = tf.identity(tensors.first_u_batch, name='u')
+        else:
+            u_batch = tf.add(prev_layer.u_batch, prev_layer.o_batch, name='u')
+
+        with tf.name_scope('m'):
+            Ax_batch = tf.nn.embedding_lookup(A, x_batch)  # [N, M, J, d]
+            if params.position_encoding:
+                Ax_batch *= l_aug_aug  # position encoding
+            Ax_batch *= x_mask_aug_batch  # masking
+            m_batch = tf.reduce_sum(Ax_batch, 2)  # [N, M, d]
+            m_batch = tf.add(tf.expand_dims(TA, 0), m_batch, name='m')  # temporal encoding
+
+        with tf.name_scope('c'):
+            Cx_batch = tf.nn.embedding_lookup(C, x_batch)  # [N, M, J, d]
+            if params.position_encoding:
+                Cx_batch *= l_aug_aug  # position encoding
+            Cx_batch *= x_mask_aug_batch
+            c_batch = tf.reduce_sum(Cx_batch, 2)
+            c_batch = tf.add(tf.expand_dims(TC, 0), c_batch, name='c')  # temporal encoding
+
+        with tf.name_scope('p'):
+            u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
+            um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])  # [N, M]
+            if linear_start:
+                p_batch = tf.mul(um_batch, m_mask_batch, name='p')
+            else:
+                p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
+
+        with tf.name_scope('o'):
+            o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
+
+        self.A, self.TA, self.C, self.TC = A, TA, C, TC
+        self.u_batch, self.o_batch = u_batch, o_batch
+
+    def _softmax_with_mask(self, um_batch, m_mask_batch):
+        exp_um_batch = tf.exp(um_batch)  # [N, M]
+        masked_batch = exp_um_batch * m_mask_batch  # [N, M]
+        sum_2d_batch = tf.expand_dims(tf.reduce_sum(masked_batch, 1), -1)  # [N, 1]
+        p_batch = tf.div(masked_batch, sum_2d_batch, name='p')  # [N, M]
+        return p_batch
+
+
 class N2NModel(BaseModel):
     def _get_l(self):
         J, d = self.params.max_sent_size, self.params.hidden_size
@@ -37,27 +113,21 @@ class N2NModel(BaseModel):
                 x_mask_batch = tf.placeholder('float', shape=[N, M, J], name='x_mask')
                 x_mask_aug_batch = tf.expand_dims(x_mask_batch, -1, 'x_mask_aug')
                 m_mask_batch = tf.placeholder('float', shape=[N, M], name='m_mask')
-                self.x = x_batch
-                self.x_mask = x_mask_batch
-                self.m_mask = m_mask_batch
 
             with tf.name_scope('q'):
                 q_batch = tf.placeholder('int32', shape=[N, J], name='q')
                 q_mask_batch = tf.placeholder('float', shape=[N, J], name='q_mask')
                 q_mask_aug_batch = tf.expand_dims(q_mask_batch, -1, 'q_mask_aug')
-                self.q = q_batch
-                self.q_mask = q_mask_batch
 
             y_batch = tf.placeholder('int32', shape=[N], name='y')
-            self.y = y_batch
 
             learning_rate = tf.placeholder('float', name='lr')
-            self.learning_rate = learning_rate
 
         with tf.name_scope('const'):
             l = self._get_l()  # [J, d]
             l_aug = tf.expand_dims(l, 0, name='l_aug')
             l_aug_aug = tf.expand_dims(l_aug, 0, name='l_aug_aug')  # [1, 1, J, d]
+
 
         with tf.name_scope('a'):
             a_batch = tf.nn.embedding_lookup(tf.diag(tf.ones(shape=[V])), y_batch, name='a')  # [N, d]
@@ -71,79 +141,29 @@ class N2NModel(BaseModel):
             Bq_batch *= q_mask_aug_batch
             first_u_batch = tf.reduce_sum(Bq_batch, 1, name='first_u')  # [N, d]
 
-        u_batch_list = []
-        o_batch_list = []
-        As, TAs, Cs, TCs = [], [], [], []
+        phs, consts, tensors = Container(), Container(), Container()
+        phs.x_batch, phs.x_mask_batch, phs.x_mask_aug_batch, phs.m_mask_batch = x_batch, x_mask_batch, x_mask_aug_batch, m_mask_batch
+        consts.l_aug_aug = l_aug_aug
+        tensors.B, tensors.first_u_batch = B, first_u_batch
+
+        memory_layers = []
+        cur_layer = None
         for layer_index in xrange(params.num_layers):
             with tf.variable_scope('layer_%d' % layer_index):
-                if layer_index == 0:
-                    A = tf.identity(B, name='A') if params.tying == 'adj' else tf.get_variable('A', dtype='float', shape=[V, d])
-                    TA = tf.get_variable('TA', dtype='float', shape=[M, d])
-                    C = tf.get_variable('C', dtype='float', shape=[V, d])
-                    TC = tf.get_variable('TC', dtype='float', shape=[M, d])
-                else:
-                    if params.tying == 'adj':
-                        A = tf.identity(Cs[-1], name='A')
-                        TA = tf.identity(TCs[-1], name='TA')
-                        C = tf.get_variable('C', dtype='float', shape=[V, d])
-                        TC = tf.get_variable('TC', dtype='float', shape=[M, d])
-                    elif params.tying == 'rnn':
-                        A = tf.identity(As[-1], name='A')
-                        TA = tf.identity(TAs[-1], name='TA')
-                        C = tf.identity(Cs[-1], name='C')
-                        TC = tf.identity(TCs[-1], name='TC')
-                    else:
-                        raise Exception('Unknown tying method: %s' % params.tying)
-                As.append(A)
-                TAs.append(TA)
-                Cs.append(C)
-                TCs.append(TC)
-
-                if layer_index == 0:
-                    u_batch = tf.identity(first_u_batch, name='u')
-                else:
-                    u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='u')
-
-                with tf.name_scope('m'):
-                    Ax_batch = tf.nn.embedding_lookup(As[layer_index], x_batch)  # [N, M, J, d]
-                    if params.position_encoding:
-                        Ax_batch *= l_aug_aug  # position encoding
-                    Ax_batch *= x_mask_aug_batch  # masking
-                    m_batch = tf.reduce_sum(Ax_batch, 2)  # [N, M, d]
-                    m_batch = tf.add(tf.expand_dims(TAs[layer_index], 0), m_batch, name='m')  # temporal encoding
-
-                with tf.name_scope('c'):
-                    Cx_batch = tf.nn.embedding_lookup(Cs[layer_index], x_batch)  # [N, M, J, d]
-                    if params.position_encoding:
-                        Cx_batch *= l_aug_aug  # position encoding
-                    Cx_batch *= x_mask_aug_batch
-                    c_batch = tf.reduce_sum(Cx_batch, 2)
-                    c_batch = tf.add(tf.expand_dims(TCs[layer_index], 0), c_batch, name='c')  # temporal encoding
-
-                with tf.name_scope('p'):
-                    u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
-                    um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])  # [N, M]
-                    if linear_start:
-                        p_batch = tf.mul(um_batch, m_mask_batch, name='p')
-                    else:
-                        p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
-
-                with tf.name_scope('o'):
-                    o_batch = tf.reduce_sum(c_batch * tf.expand_dims(p_batch, -1), 1)  # [N, d]
-
-            u_batch_list.append(u_batch)
-            o_batch_list.append(o_batch)
+                memory_layer = MemoryLayer(params, cur_layer, phs, consts, tensors)
+                memory_layers.append(memory_layer)
+                cur_layer = memory_layer
 
         with tf.variable_scope('last_u'):
             if params.tying == 'rnn':
                 H = tf.get_variable('H', dtype='float', shape=[d, d])
-                last_u_batch = tf.add(tf.matmul(u_batch_list[-1], H), o_batch_list[-1], name='last_u')
+                last_u_batch = tf.add(tf.matmul(cur_layer.u_batch, H), cur_layer.o_batch, name='last_u')
             else:
-                last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
+                last_u_batch = tf.add(cur_layer.u_batch, cur_layer.o_batch, name='last_u')
 
-        with tf.name_scope('ap'):
+        with tf.variable_scope('ap'):
             if params.tying == 'adj':
-                W = tf.transpose(Cs[-1], name='W')
+                W = tf.transpose(cur_layer.C, name='W')
             elif params.tying == 'rnn':
                 W = tf.get_variable('W', dtype='float', shape=[d, V])
             else:
@@ -157,15 +177,11 @@ class N2NModel(BaseModel):
             tf.add_to_collection('losses', avg_cross_entropy)
             total_loss = tf.add_n(tf.get_collection('losses'), name='total_loss')
             losses = tf.get_collection('losses', loss_scope)
-            self.total_loss = total_loss
 
         with tf.name_scope('acc'):
             correct_vec = tf.equal(tf.argmax(ap_batch, 1), tf.argmax(a_batch, 1))
             num_corrects = tf.reduce_sum(tf.cast(correct_vec, 'float'), name='num_corrects')
             acc = tf.reduce_mean(tf.cast(correct_vec, 'float'), name='acc')
-            self.correct_vec = correct_vec
-            self.num_corrects = num_corrects
-            self.acc = acc
 
         with tf.name_scope('opt'):
             opt = tf.train.GradientDescentOptimizer(learning_rate)
@@ -173,8 +189,24 @@ class N2NModel(BaseModel):
             grads_and_vars = opt.compute_gradients(cross_entropy)
             clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
             opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=self.global_step)
-            self.opt_op = opt_op
 
+        # placeholders
+        self.x = x_batch
+        self.x_mask = x_mask_batch
+        self.m_mask = m_mask_batch
+        self.q = q_batch
+        self.q_mask = q_mask_batch
+        self.y = y_batch
+        self.learning_rate = learning_rate
+
+        # tensors
+        self.total_loss = total_loss
+        self.correct_vec = correct_vec
+        self.num_corrects = num_corrects
+        self.acc = acc
+        self.opt_op = opt_op
+
+        # summaries
         summaries.append(tf.scalar_summary("%s (raw)" % total_loss.op.name, total_loss))
         self.merged_summary = tf.merge_summary(summaries)
 
