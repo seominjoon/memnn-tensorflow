@@ -1,69 +1,10 @@
 import tensorflow as tf
 import numpy as np
-import progressbar as pb
-import os
 
-from read_data import DataSet
 from models.base_model import BaseModel
 
 
 class N2NModel(BaseModel):
-    def _build_tower(self):
-        self.variables = self._init_variables()
-        self._build_graph(self.params.linear_start)
-
-    def _init_variables(self):
-        params = self.params
-        V, M, d = params.vocab_size, params.memory_size, params.hidden_size
-
-        class Variables(object):
-            pass
-
-        variables = Variables()
-        with tf.variable_scope("var", initializer=tf.random_normal_initializer(params.init_mean, params.init_std)):
-            As, TAs, Cs, TCs = [], [], [], []
-            for layer_index in xrange(params.num_layers):
-                with tf.variable_scope("layer_%d" % layer_index):
-                    if layer_index == 0:
-                        A = tf.get_variable('A', dtype='float', shape=[V, d])
-                        TA = tf.get_variable('TA', dtype='float', shape=[M, d])
-                        C = tf.get_variable('C', dtype='float', shape=[V, d])
-                        TC = tf.get_variable('TC', dtype='float', shape=[M, d])
-                    else:
-                        if params.tying == 'adj':
-                            A = tf.identity(Cs[-1], name='A')
-                            TA = tf.identity(TCs[-1], name='TA')
-                            C = tf.get_variable('C', dtype='float', shape=[V, d])
-                            TC = tf.get_variable('TC', dtype='float', shape=[M, d])
-                        elif params.tying == 'rnn':
-                            A = tf.identity(As[-1], name='A')
-                            TA = tf.identity(TAs[-1], name='TA')
-                            C = tf.identity(Cs[-1], name='C')
-                            TC = tf.identity(TCs[-1], name='TC')
-                        else:
-                            raise Exception('Unknown tying method: %s' % params.tying)
-                    As.append(A)
-                    TAs.append(TA)
-                    Cs.append(C)
-                    TCs.append(TC)
-
-            if params.tying == 'adj':
-                B = tf.identity(As[0], name='B')
-                W = tf.transpose(Cs[-1], name='W')
-            elif params.tying == 'rnn':
-                B = tf.get_variable('B', dtype='float', shape=[V, d])
-                W = tf.get_variable('W', dtype='float', shape=[d, V])
-            else:
-                raise Exception('Unknown tying method: %s' % params.tying)
-
-            if params.tying == 'rnn':
-                H = tf.get_variable('H', dtype='float', shape=[d, d])
-                variables.H = H
-
-            variables.As, variables.TAs, variables.B, variables.Cs, variables.TCs, variables.W = As, TAs, B, Cs, TCs, W
-
-        return variables
-
     def _get_l(self):
         J, d = self.params.max_sent_size, self.params.hidden_size
         def f(JJ, jj, dd, kk):
@@ -81,16 +22,10 @@ class N2NModel(BaseModel):
         p_batch = tf.div(masked_batch, sum_2d_batch, name='p')  # [N, M]
         return p_batch
 
-    def _build_graph(self, linear=False):
+    def _build_tower(self):
         params = self.params
-        variables = self.variables
-
+        linear_start = params.linear_start
         N, M, J, V, d = params.batch_size, params.memory_size, params.max_sent_size, params.vocab_size, params.hidden_size
-        Q = params.max_ques_size
-
-        As, TAs, B, Cs, TCs, W = variables.As, variables.TAs, variables.B, variables.Cs, variables.TCs, variables.W
-        if params.tying == 'rnn':
-            H = variables.H
 
         summaries = []
 
@@ -127,7 +62,9 @@ class N2NModel(BaseModel):
         with tf.name_scope('a'):
             a_batch = tf.nn.embedding_lookup(tf.diag(tf.ones(shape=[V])), y_batch, name='a')  # [N, d]
 
+
         with tf.name_scope('first_u'):
+            B = tf.get_variable('B', dtype='float', shape=[V, d])
             Bq_batch = tf.nn.embedding_lookup(B, q_batch)  # [N, J, d]
             if params.position_encoding:
                 Bq_batch *= l_aug
@@ -136,8 +73,32 @@ class N2NModel(BaseModel):
 
         u_batch_list = []
         o_batch_list = []
+        As, TAs, Cs, TCs = [], [], [], []
         for layer_index in xrange(params.num_layers):
-            with tf.name_scope('layer_%d' % layer_index):
+            with tf.variable_scope('layer_%d' % layer_index):
+                if layer_index == 0:
+                    A = tf.identity(B, name='A') if params.tying == 'adj' else tf.get_variable('A', dtype='float', shape=[V, d])
+                    TA = tf.get_variable('TA', dtype='float', shape=[M, d])
+                    C = tf.get_variable('C', dtype='float', shape=[V, d])
+                    TC = tf.get_variable('TC', dtype='float', shape=[M, d])
+                else:
+                    if params.tying == 'adj':
+                        A = tf.identity(Cs[-1], name='A')
+                        TA = tf.identity(TCs[-1], name='TA')
+                        C = tf.get_variable('C', dtype='float', shape=[V, d])
+                        TC = tf.get_variable('TC', dtype='float', shape=[M, d])
+                    elif params.tying == 'rnn':
+                        A = tf.identity(As[-1], name='A')
+                        TA = tf.identity(TAs[-1], name='TA')
+                        C = tf.identity(Cs[-1], name='C')
+                        TC = tf.identity(TCs[-1], name='TC')
+                    else:
+                        raise Exception('Unknown tying method: %s' % params.tying)
+                As.append(A)
+                TAs.append(TA)
+                Cs.append(C)
+                TCs.append(TC)
+
                 if layer_index == 0:
                     u_batch = tf.identity(first_u_batch, name='u')
                 else:
@@ -162,7 +123,7 @@ class N2NModel(BaseModel):
                 with tf.name_scope('p'):
                     u_batch_aug = tf.expand_dims(u_batch, -1)  # [N, d, 1]
                     um_batch = tf.squeeze(tf.batch_matmul(m_batch, u_batch_aug), [2])  # [N, M]
-                    if linear:
+                    if linear_start:
                         p_batch = tf.mul(um_batch, m_mask_batch, name='p')
                     else:
                         p_batch = self._softmax_with_mask(um_batch, m_mask_batch)
@@ -173,13 +134,21 @@ class N2NModel(BaseModel):
             u_batch_list.append(u_batch)
             o_batch_list.append(o_batch)
 
-        if params.tying == 'rnn':
-            last_u_batch = tf.add(tf.matmul(u_batch_list[-1], H), o_batch_list[-1], name='last_u')
-        else:
-            last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
+        with tf.variable_scope('last_u'):
+            if params.tying == 'rnn':
+                H = tf.get_variable('H', dtype='float', shape=[d, d])
+                last_u_batch = tf.add(tf.matmul(u_batch_list[-1], H), o_batch_list[-1], name='last_u')
+            else:
+                last_u_batch = tf.add(u_batch_list[-1], o_batch_list[-1], name='last_u')
 
         with tf.name_scope('ap'):
-            logit_batch = tf.matmul(last_u_batch, W, name='ap_raw')  # [N d] X [d V] = [N V]
+            if params.tying == 'adj':
+                W = tf.transpose(Cs[-1], name='W')
+            elif params.tying == 'rnn':
+                W = tf.get_variable('W', dtype='float', shape=[d, V])
+            else:
+                raise Exception('Unknown tying method: %s' % params.tying)
+            logit_batch = tf.matmul(last_u_batch, W, name='logit')  # [N d] X [d V] = [N V]
             ap_batch = tf.nn.softmax(logit_batch, name='ap')
 
         with tf.name_scope('loss') as loss_scope:
@@ -200,6 +169,7 @@ class N2NModel(BaseModel):
 
         with tf.name_scope('opt'):
             opt = tf.train.GradientDescentOptimizer(learning_rate)
+            # FIXME : This must muse cross_entropy for some reason!
             grads_and_vars = opt.compute_gradients(cross_entropy)
             clipped_grads_and_vars = [(tf.clip_by_norm(grad, params.max_grad_norm), var) for grad, var in grads_and_vars]
             opt_op = opt.apply_gradients(clipped_grads_and_vars, global_step=self.global_step)
@@ -207,7 +177,6 @@ class N2NModel(BaseModel):
 
         summaries.append(tf.scalar_summary("%s (raw)" % total_loss.op.name, total_loss))
         self.merged_summary = tf.merge_summary(summaries)
-
 
     def _get_feed_dict(self, batch):
         sent_batch, ques_batch = batch[:2]
