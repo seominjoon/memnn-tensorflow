@@ -7,6 +7,7 @@ from models.base_model import BaseModel
 class Container(object):
     pass
 
+
 class MemoryLayer(object):
     def __init__(self, params, prev_layer, phs, consts, tensors):
         self.params = params
@@ -223,37 +224,9 @@ class N2NModel(BaseModel):
                      self.q: q_batch, self.q_mask: q_mask_batch, self.y: y_batch}
         return feed_dict
 
-    def _pad(self, array, inc):
-        assert len(array.shape) > 0, "Array must be at least 1D!"
-        if len(array.shape) == 1:
-            return np.concatenate([array, np.zeros([inc])], 0)
-        else:
-            return np.concatenate([array, np.zeros([inc, array.shape[1]])], 0)
-
-    def train_batch(self, sess, learning_rate, batch):
-        feed_dict = self._get_feed_dict(batch)
-        feed_dict[self.learning_rate] = learning_rate
-        return sess.run([self.opt_op, self.merged_summary, self.global_step], feed_dict=feed_dict)
-
-    def test_batch(self, sess, batch):
-        params = self.params
-        batch_size = params.batch_size
-
-        actual_batch_size = len(batch[0])
-        diff = batch_size - actual_batch_size
-        if diff > 0:
-            batch = [self._pad(each, diff) for each in batch]
-
-        feed_dict = self._get_feed_dict(batch)
-        correct_vec, total_loss, summary_str, global_step = \
-            sess.run([self.correct_vec, self.total_loss, self.merged_summary, self.global_step], feed_dict=feed_dict)
-        num_corrects = np.sum(correct_vec[:actual_batch_size])
-
-        return num_corrects, total_loss, summary_str, global_step
-
     def _prepro_sent_batch(self, sent_batch):
         params = self.params
-        N, M, J = len(sent_batch), params.memory_size, params.max_sent_size
+        N, M, J = params.batch_size, params.memory_size, params.max_sent_size
         x_batch = np.zeros([N, M, J])
         x_mask_batch = np.zeros([N, M, J])
         m_mask_batch = np.zeros([N, M])
@@ -271,7 +244,7 @@ class N2NModel(BaseModel):
     def _prepro_ques_batch(self, ques_batch):
         params = self.params
         # FIXME : adhoc for now!
-        N, J = len(ques_batch), params.max_sent_size
+        N, J = params.batch_size, params.max_sent_size
         q_batch = np.zeros([N, J])
         q_mask_batch = np.zeros([N, J])
 
