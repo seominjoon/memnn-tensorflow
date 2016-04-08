@@ -18,7 +18,7 @@ class DataSet(object):
         self.idx_in_epoch = 0
         self.batch_size = batch_size
         self.include_leftover = include_leftover
-        self.num_batches = self.num_examples / self.batch_size + int(include_leftover)
+        self.num_batches = int(self.num_examples / self.batch_size) + int(include_leftover)
         self.reset()
 
     def get_next_labeled_batch(self):
@@ -64,7 +64,7 @@ def read_babi_files(file_paths):
     answers = []
 
     for file_path in file_paths:
-        with open(file_path, 'rb') as fh:
+        with open(file_path, 'r') as fh:
             lines = fh.readlines()
             paragraph = []
             for line_num, line in enumerate(lines):
@@ -87,7 +87,7 @@ def read_babi_files(file_paths):
                     vocab_set |= set(sentence)
                 else:
                     logging.error("Invalid line encountered: line %d in %s" % (line_num + 1, file_path))
-            print "Loaded %d examples from: %s" % (len(paragraphs), os.path.basename(file_path))
+            print("Loaded %d examples from: %s" % (len(paragraphs), os.path.basename(file_path)))
 
     return vocab_set, paragraphs, questions, answers
 
@@ -107,7 +107,7 @@ def read_babi_split(batch_size, *file_paths_list):
     qs_list = [[[_get(vocab_map, word) for word in question] for question in questions] for questions in questions_list]
     ys_list = [[_get(vocab_map, answer) for answer in answers] for answers in answers_list]
 
-    data_sets = [DataSet(batch_size, range(len(xs)), xs, qs, ys)
+    data_sets = [DataSet(batch_size, list(range(len(xs))), xs, qs, ys)
                  for xs, qs, ys in zip(xs_list, qs_list, ys_list)]
     # just for debugging
     for data_set in data_sets:
@@ -131,8 +131,8 @@ def read_babi(batch_size, dir_path, task, suffix=""):
 
 def split_val(data_set, ratio):
     end_idx = int(data_set.num_examples * (1-ratio))
-    left = DataSet(data_set.batch_size, range(end_idx), data_set.xs[:end_idx], data_set.qs[:end_idx], data_set.ys[:end_idx])
-    right = DataSet(data_set.batch_size, range(len(data_set.xs) - end_idx), data_set.xs[end_idx:], data_set.qs[end_idx:], data_set.ys[end_idx:])
+    left = DataSet(data_set.batch_size, list(range(end_idx)), data_set.xs[:end_idx], data_set.qs[:end_idx], data_set.ys[:end_idx])
+    right = DataSet(data_set.batch_size, list(range(len(data_set.xs) - end_idx)), data_set.xs[end_idx:], data_set.qs[end_idx:], data_set.ys[end_idx:])
     return left, right
 
 
@@ -148,5 +148,5 @@ if __name__ == "__main__":
     # print test.vocab_size, test.max_m_len, test.max_s_len, test.max_q_len
     x_batch, q_batch, y_batch = train.get_next_labeled_batch()
     max_sent_size, max_ques_size = get_max_sizes(train, test)
-    print max_sent_size, max_ques_size
+    print(max_sent_size, max_ques_size)
     # print x_batch

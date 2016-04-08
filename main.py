@@ -60,7 +60,7 @@ def main(_):
     # FIXME : adhoc for now!
     FLAGS.max_sent_size = max(FLAGS.max_sent_size, FLAGS.max_ques_size)
     FLAGS.train_num_batches = train_ds.num_batches
-    FLAGS.eval_num_batches = val_ds.num_batches
+    FLAGS.val_num_batches = val_ds.num_batches
     FLAGS.test_num_batches = test_ds.num_batches
     if not os.path.exists(FLAGS.save_dir):
         os.mkdir(FLAGS.save_dir)
@@ -85,7 +85,7 @@ def main(_):
     with tf.Session(graph=graph) as sess:
         sess.run(tf.initialize_all_variables())
         if FLAGS.train:
-            writer = tf.train.SummaryWriter(FLAGS.log_dir, sess.graph_def)
+            writer = tf.train.SummaryWriter(FLAGS.log_dir, sess.graph)
             if FLAGS.load:
                 model.load(sess)
             model.train(sess, writer, train_ds, val_ds)

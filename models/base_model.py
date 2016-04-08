@@ -57,13 +57,13 @@ class BaseModel(object):
         anneal_ratio = params.anneal_ratio
 
         print("training %d epochs ..." % num_epochs)
-        for epoch_idx in xrange(num_epochs):
+        for epoch_idx in range(num_epochs):
             if epoch_idx > 0 and epoch_idx % anneal_period == 0:
                 learning_rate *= anneal_ratio
             pbar = pb.ProgressBar(widgets=["epoch %d|" % (train_data_set.num_epochs_completed + 1),
                                            pb.Percentage(), pb.Bar(), pb.ETA()], maxval=num_batches)
             pbar.start()
-            for num_batches_completed in xrange(num_batches):
+            for num_batches_completed in range(num_batches):
                 batch = train_data_set.get_next_labeled_batch()
                 _, summary_str, global_step = self.train_batch(sess, learning_rate, batch)
                 writer.add_summary(summary_str, global_step)
@@ -87,7 +87,7 @@ class BaseModel(object):
         pbar = pb.ProgressBar(widgets=[string, pb.Percentage(), pb.Bar(), pb.ETA()], maxval=num_batches)
         losses = []
         pbar.start()
-        for num_batches_completed in xrange(num_batches):
+        for num_batches_completed in range(num_batches):
             batch = eval_data_set.get_next_labeled_batch()
             cur_num_corrects, cur_loss, _, global_step = self.test_batch(sess, batch)
             num_corrects += cur_num_corrects

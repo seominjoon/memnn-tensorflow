@@ -149,7 +149,7 @@ class N2NModel(BaseModel):
 
         memory_layers = []
         cur_layer = None
-        for layer_index in xrange(params.num_layers):
+        for layer_index in range(params.num_layers):
             with tf.variable_scope('layer_%d' % layer_index):
                 memory_layer = MemoryLayer(params, cur_layer, phs, consts, tensors)
                 memory_layers.append(memory_layer)
